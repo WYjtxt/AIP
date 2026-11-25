@@ -37,7 +37,11 @@
 
 - 在 Windows 上将同一版本的 `PlatformOneClickDeployer.exe`、`payload/` 和 `packages/` 放在同一目录。核对 `payload/native-release.json` 的 `release` 为 `V3.0.5-native`，且列出了目标架构的文件和 SHA-256。
 - 介质应包含 `payload/platform_code.tar.gz`、`packages/<架构>/runtime_bundle.tar.gz`、该架构的系统及 Python 依赖，以及 `packages/native/<架构>/` 下的 `backend-runtime.tar.gz`、`frontend-runtime.tar.gz`、`media-runtime.tar.gz` 和 `gateway-runtime.tar.gz`。
-- 已核对的硬件配置为 **Ubuntu 20.04 / x86_64 / 算能 BM1684X（SC7）** 和 **openEuler 22.03 SP4 / aarch64 / 昇腾 310P3**。准备可通过 SSH 登录的 root 或具备 sudo 权限的账号。新装使用空程序目录，默认 `/data/AIGO/platform_start`。已有容器部署标记的目录会被原生安装器拒绝。
+- **Ubuntu 20.04 / x86_64** 主机只需算能驱动可正常识别设备。各厂商的板卡商品名可以不同，现场可用 `bm-smi` 查看驱动识别的设备。
+- **openEuler 22.03 SP4 / aarch64** 已核对的硬件配置为昇腾 310P3。
+- 准备可通过 SSH 登录的 root 或具备 sudo 权限的账号。新装使用空程序目录，默认 `/data/AIGO/platform_start`。已有容器部署标记的目录会被原生安装器拒绝。
+
+历史 `V3.0.5-native` 的 x86 安装器会校验 BM1684X 芯片。使用其他算能芯片时，请按驱动识别的实际芯片选择适配的安装介质、运行库和 BMODEL。
 
 ### 2. 首次安装
 
