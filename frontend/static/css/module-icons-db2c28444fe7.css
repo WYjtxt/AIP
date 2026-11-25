@@ -1,0 +1,7 @@
+/* Bootstrap Icons: common dimensions for top-level module icons only. */
+#app .home .home_menu .menu > .el-menu > .el-submenu > .el-submenu__title > img.imgNoActive,
+#app .home .home_menu .menu > .el-menu > .el-submenu > .el-submenu__title > img.imgActive,
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf > img.imgNoActive,
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf > img.imgActive {
+ width:20px!important;height:20px!important;object-fit:contain;vertical-align:middle;opacity:1!important;flex-shrink:0;
+}

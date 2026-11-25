@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>人员尾随配置</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 18px 22px; font: 14px/1.6 -apple-system, "Microsoft YaHei", sans-serif; color: #26384c; background: #f4f7fb; }
+  h2 { margin: 0 0 4px; font-size: 20px; }
+  .muted { color: #66758c; font-size: 12px; }
+  .card { background: #fff; border: 1px solid #e1e8f1; border-radius: 8px; padding: 16px 18px; margin-bottom: 14px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+  .field label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
+  select, input[type=text] { height: 34px; padding: 0 10px; border: 1px solid #cdd8e6; border-radius: 5px; background: #fff; font: inherit; min-width: 200px; }
+  button { height: 34px; padding: 0 14px; border: 1px solid #c9d5e5; border-radius: 5px; background: #fff; color: #35516f; font: inherit; cursor: pointer; }
+  button.primary { background: #2f65d9; border-color: #2f65d9; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .stage { position: relative; width: 960px; max-width: 100%; margin-top: 10px; }
+  .stage img { width: 100%; display: block; border-radius: 6px; background: #111; }
+  canvas { position: absolute; left: 0; top: 0; cursor: crosshair; }
+  .legend { display: flex; gap: 18px; margin-top: 8px; font-size: 12px; color: #66758c; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  .msg { margin-top: 10px; padding: 10px 14px; border-radius: 6px; display: none; }
+  .msg.ok { display: block; background: #eefbf2; color: #1f7a44; }
+  .msg.err { display: block; background: #fff0f0; color: #a33434; }
+  .step { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #eef3fb; color: #2f65d9; font-size: 12px; margin-left: 8px; }
+</style>
+</head>
+<body>
+<h2>人员尾随配置</h2>
+<div class="muted">先选监控点取一张画面，然后：① 在画面里点 4 个点画检测框；② 点 2 个点画框内警戒线；③ 选择人员通行方向（画面里往哪边走）。</div>
+
+<div class="card">
+  <div class="row">
+    <div class="field">
+      <label>监控点</label>
+      <select id="camera"><option value="">加载中…</option></select>
+    </div>
+    <div class="field">
+      <label>配置名称</label>
+      <input type="text" id="confName" placeholder="例如 1号楼-闸机-尾随" style="min-width:260px">
+    </div>
+    <div class="field">
+      <label>通行方向</label>
+      <div id="dirLabel" style="height:34px;line-height:34px;padding:0 12px;border:1px solid #cdd8e6;border-radius:5px;background:#fff;min-width:250px;cursor:pointer" title="点击可切换方向（也可直接点画面里的箭头）">↓ down（由远及近，人朝镜头走）</div>
+    </div>
+    <button id="btnReload">刷新画面</button>
+    <button id="btnBox">重画检测框</button>
+    <button id="btnLine">重画警戒线</button>
+    <button class="primary" id="btnSave">保存配置</button>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#ff2d2d"></i>检测框（4 点）</span>
+    <span><i class="dot" style="background:#ff00ff"></i>警戒线（2 点）</span>
+    <span><i class="dot" style="background:#ff3b30"></i>方向箭头（点箭头可切换 里/外）</span>
+    <span id="stepTip" class="step">当前：画检测框</span>
+  </div>
+  <div class="stage" id="stage">
+    <img id="shot" alt="监控点画面" style="width:960px;height:540px">
+    <canvas id="cv" width="960" height="540"></canvas>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+
+<script>
+(function () {
+  var API = (window.wgParameter && window.wgParameter.url_5000) || (location.origin + '/api');
+  var LIB_ID = 100, TEMPLATE_ID = 100, TEMPLATE_SMALL_ID = 100, TYPE_ID = 100;
+  var MINE_ID = 2, RESOURCE_ID = 3, COMPUTING_ID = 1, TYPE_CONFIG_ID = 4;
+  var SRC_W = 1920, SRC_H = 1080;
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var shot = document.getElementById('shot');
+  var msg = document.getElementById('msg');
+  var stepTip = document.getElementById('stepTip');
+
+  var box = [];       // [{x,y}] 画面坐标
+  var line = [];      // [{x,y}]
+  var mode = 'box';   // box | line
+  // 通行方向：箭头指向人员行走方向。朝里（指向画面下方/镜头侧，即闸机内侧）= down，朝外（指向上方/远端）= up
+  var direction = 'down';
+
+  function token() { return localStorage.getItem('token') || ''; }
+  function auth() { return { 'Authorization': 'Bearer ' + token(), 'Content-Type': 'application/json' }; }
+  function show(text, ok) { msg.className = 'msg ' + (ok ? 'ok' : 'err'); msg.textContent = text; }
+  function toSrc(p) { return { x: Math.round(p.x * SRC_W / cv.width), y: Math.round(p.y * SRC_H / cv.height) }; }
+  function clamp(p) { return { x: Math.max(0, Math.min(cv.width, p.x)), y: Math.max(0, Math.min(cv.height, p.y)) }; }
+  function lineMid() { return { x: (line[0].x + line[1].x) / 2, y: (line[0].y + line[1].y) / 2 }; }
+  function arrowTip() {
+    var m = lineMid();
+    return { x: m.x, y: m.y + (direction === 'down' ? 46 : -46) };
+  }
+  function dirText() {
+    return direction === 'down' ? '↓ down（由远及近，人朝镜头走）' : '↑ up（由近及远，人背向镜头走）';
+  }
+  function setDirection(dir) {
+    direction = dir;
+    var label = document.getElementById('dirLabel');
+    if (label) label.textContent = dirText();
+    draw();
+  }
+  function toggleDirection() { setDirection(direction === 'down' ? 'up' : 'down'); }
+
+  function draw() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    if (box.length) {
+      ctx.beginPath();
+      ctx.moveTo(box[0].x, box[0].y);
+      box.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+      if (box.length === 4) ctx.closePath();
+      ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#ff2d2d';
+      box.forEach(function (p) { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 6.283); ctx.fill(); });
+    }
+    if (line.length) {
+      ctx.beginPath();
+      ctx.moveTo(line[0].x, line[0].y);
+      line.slice(1).forEach(function (p) { ctx.lineTo(p.x, p.y); });
+      ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#ffd400';
+      line.forEach(function (p) { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 6.283); ctx.fill(); });
+      if (line.length === 2) {
+        var m = lineMid(), tip = arrowTip();
+        // 可点击的方向箭头（画完线自动出现，点一下切换里/外）
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 26, 0, 6.283);
+        ctx.strokeStyle = 'rgba(255,59,48,.35)'; ctx.lineWidth = 1; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(m.x, m.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 4; ctx.stroke();
+        var ang = Math.atan2(tip.y - m.y, tip.x - m.x);
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(tip.x - 14 * Math.cos(ang - 0.42), tip.y - 14 * Math.sin(ang - 0.42));
+        ctx.lineTo(tip.x - 14 * Math.cos(ang + 0.42), tip.y - 14 * Math.sin(ang + 0.42));
+        ctx.closePath();
+        ctx.fillStyle = '#ff3b30'; ctx.fill();
+        ctx.fillStyle = '#ff3b30';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText(direction === 'down' ? '里 ↓ down' : '外 ↑ up', m.x + 32, m.y + 5);
+      }
+    }
+    stepTip.textContent = '当前：' + (mode === 'box' ? '画检测框（已 ' + box.length + '/4）'
+      : '画警戒线（已 ' + line.length + '/2）' + (line.length === 2 ? ' · 点红色箭头可切换方向' : ''));
+  }
+
+  function nearArrow(p) {
+    if (line.length !== 2) return false;
+    var m = lineMid(), t = arrowTip();
+    return Math.hypot(p.x - m.x, p.y - m.y) <= 34 ||
+           Math.hypot(p.x - t.x, p.y - t.y) <= 30;
+  }
+
+  cv.addEventListener('click', function (e) {
+    var r = cv.getBoundingClientRect();
+    var p = clamp({ x: e.clientX - r.left, y: e.clientY - r.top });
+    if (nearArrow(p)) {              // 点到箭头/中点圆：切换方向，不新增顶点
+      toggleDirection();
+      return;
+    }
+    if (mode === 'box') {
+      if (box.length >= 4) box = [];
+      box.push(p);
+      if (box.length === 4) { mode = 'line'; }
+    } else {
+      if (line.length >= 2) line = [];
+      line.push(p);
+    }
+    draw();
+  });
+
+  function loadCameras() {
+    fetch(API + '/model_view/equipment_show?scope=devices&page=1&per_page=300', { headers: auth() })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        var payload = res && (res.data_list || res.data || res);
+        var roots = (payload && (payload.data || payload.list || payload.rows)) || [];
+        if (!Array.isArray(roots)) roots = [];
+        var items = [];
+        roots.forEach(function (p) {
+          if (!p) return;
+          if (p.children && p.children.length) {
+            p.children.forEach(function (c) { if (c && c.id != null) items.push(c); });
+          } else if (p.id != null) {
+            items.push(p);
+          }
+        });
+        var sel = document.getElementById('camera');
+        sel.innerHTML = '<option value="">请选择监控点</option>';
+        items.forEach(function (it) {
+          var id = it.id || it.equipment_id;
+          var name = it.equipment_name || it.name || ('设备' + id);
+          if (it.code) name = name + '（通道' + it.code + '）';
+          var opt = document.createElement('option');
+          opt.value = id; opt.textContent = name;
+          sel.appendChild(opt);
+        });
+      })
+      .catch(function () { show('监控点列表读取失败，请刷新重试', false); });
+  }
+
+  function loadSnapshot() {
+    var id = document.getElementById('camera').value;
+    if (!id) { show('请先选择监控点', false); return; }
+    show('正在获取画面…', true);
+    fetch(API + '/model_view/image_show?equipment_id=' + encodeURIComponent(id), { headers: auth() })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || res.code !== 200 || !res.msg) throw new Error((res && res.msg) || '取图失败');
+        shot.src = API + res.msg + (res.msg.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+        show('画面已加载，可以开始绘制', true);
+      })
+      .catch(function (e) { show('画面获取失败：' + e.message, false); });
+  }
+
+  function save() {
+    var id = document.getElementById('camera').value;
+    var name = (document.getElementById('confName').value || '').trim();
+    if (!id) return show('请先选择监控点', false);
+    if (!name) return show('请填写配置名称', false);
+    if (box.length !== 4) return show('检测框需要 4 个点', false);
+    if (line.length !== 2) return show('警戒线需要 2 个点', false);
+    var boxSrc = box.map(function (p) { var q = toSrc(p); return { x: q.x, y: q.y, type: '告警区域', color: '#ff0000' }; });
+    var lineSrc = line.map(toSrc);
+    var crossLine = {
+      area_type: 'line', points: lineSrc, p1: lineSrc[0], p2: lineSrc[1], direction: direction
+    };
+    var payload = {
+      conf_name: name,
+      Algorithm_library_id: LIB_ID,
+      Mine_id: MINE_ID,
+      Equipment_id: Number(id),
+      conf_area: [boxSrc],
+      cross_line_area: JSON.stringify(crossLine),
+      test_type_id: TYPE_ID,
+      label_list: JSON.stringify(['person']),
+      shield_status: 2,
+      tem_frames: '1',
+      confidence: 50,
+      tem_conf_area: [],
+      draw_type: '2',
+      img_resolution: SRC_W + 'x' + SRC_H,
+      duration_time: 0,
+      interval_time: 3,
+      image_draw_type: 1,
+      Algorithm_config_ps: '',
+      scene_typename: '',
+      sensitivity: 1,
+      resource_id: RESOURCE_ID,
+      computing_id: COMPUTING_ID,
+      defense_time_start: '00:00:00',
+      defense_time_end: '23:59:59',
+      model_template_config_id: TEMPLATE_ID,
+      model_template_type_id: TYPE_CONFIG_ID,
+      template_list_area: [],
+      image_count: '1',
+      template_small_id: TEMPLATE_SMALL_ID,
+      res_type: 1,
+      status: '1',
+      template_data: JSON.stringify([
+        { '尾随时间窗': '5' }, { '稳定帧数': '5' }, { '会话超时': '10' }
+      ])
+    };
+    var btn = document.getElementById('btnSave');
+    btn.disabled = true;
+    fetch(API + '/model_view/algorithm_add', { method: 'POST', headers: auth(), body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.code === 200) {
+          show('配置已保存：' + name + '（稍等 5~10 秒可在“智能算法配置”看到运行状态，报警在“报警列表”）', true);
+        } else {
+          show('保存失败：' + ((res && res.msg) || '未知错误'), false);
+        }
+      })
+      .catch(function (e) { show('保存失败：' + e.message, false); })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  document.getElementById('camera').addEventListener('change', loadSnapshot);
+  document.getElementById('btnReload').addEventListener('click', loadSnapshot);
+  document.getElementById('btnBox').addEventListener('click', function () { box = []; mode = 'box'; draw(); });
+  document.getElementById('btnLine').addEventListener('click', function () { line = []; mode = 'line'; draw(); });
+  document.getElementById('btnSave').addEventListener('click', save);
+  document.getElementById('dirLabel').addEventListener('click', function () { toggleDirection(); });
+  setDirection('down');
+
+  // 画布尺寸跟随图片；坐标按截图真实分辨率换算（不同摄像头分辨率不同）
+  shot.addEventListener('load', function () {
+    if (shot.naturalWidth && shot.naturalHeight) {
+      SRC_W = shot.naturalWidth;
+      SRC_H = shot.naturalHeight;
+    }
+    cv.width = shot.clientWidth || 960;
+    cv.height = shot.clientHeight || 540;
+    draw();
+  });
+
+  loadCameras();
+  draw();
+})();
+</script>
+</body>
+</html>

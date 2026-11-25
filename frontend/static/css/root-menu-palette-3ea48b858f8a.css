@@ -1,0 +1,20 @@
+/* Root-level leaf menus share the existing top-level menu palette. */
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf {
+  color: var(--platform-text, #334155) !important;
+  background: transparent !important;
+}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf:hover {
+  color: var(--platform-primary, #2563eb) !important;
+  background: var(--platform-subtle, #f8fafc) !important;
+}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf.is-active,
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf.is-active:hover {
+  color: #fff !important;
+  background: var(--platform-primary, #2563eb) !important;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, .12);
+}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf > .imgNoActive {display: inline-block;}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf > .imgActive {display: none;}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf.is-active > .imgNoActive {display: none;}
+#app .home .home_menu .menu > .el-menu > .platform-root-leaf.is-active > .imgActive {display: inline-block; opacity: 1;}

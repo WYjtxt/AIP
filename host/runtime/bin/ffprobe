@@ -1,0 +1,3 @@
+#!/bin/sh
+# AI_PLATFORM_CONTAINER_FORWARDER_V1
+exec /usr/local/bin/docker exec -i -e PATH=/data/AIGO/platform_start/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin -e FFMPEG_BIN=/data/AIGO/platform_start/runtime/bin/ffmpeg -e FFPROBE_BIN=/data/AIGO/platform_start/runtime/bin/ffprobe -e PLATFORM_NATIVE_ROOT=/data/AIGO/platform_start -e PLATFORM_SECURITY_CONFIG=/data/AIGO/platform_start/Config_files/platform-security.json -w /data/AIGO/platform_start/backend aiplatform-backend /data/AIGO/platform_start/runtime/bin/ffprobe "$@"

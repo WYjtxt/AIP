@@ -1,0 +1,8 @@
+[Unit]
+Description=Platform host disk collection
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=60s
+Unit=platform-host-disks.service
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=AI platform container host operations
+After=network.target docker.service
+[Service]
+Type=simple
+WorkingDirectory=/data/AIGO/platform_start/platform_ops
+User=root
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment="PLATFORM_NATIVE_ROOT=/data/AIGO/platform_start"
+Environment="PLATFORM_OPS_STATE_DIR=/data/AIGO/platform_start/platform_ops/state"
+Environment="PLATFORM_OPS_SERVER_CONFIG=/data/AIGO/platform_start/platform_ops/server.json"
+Environment="CONTAINER_PROJECT_DIR=/data/AIGO/platform_start/container"
+Environment="CONTAINER_IMAGE_CACHE=/home/AIGO/container-upgrades"
+ExecStart="/usr/bin/python3" "/data/AIGO/platform_start/platform_ops/push_worker.py"
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

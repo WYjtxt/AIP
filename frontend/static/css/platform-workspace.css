@@ -1,0 +1,547 @@
+/* Platform workspace presentation, 2026-10-15.
+   Loaded after the application styles. No route, data, API or media geometry changes.
+   Template subclass selectors follow the live category.vue / DataCard.vue source map. */
+
+:root {
+  --workspace-page: #f2f5fa;
+  --workspace-surface: #fff;
+  --workspace-text: #1e293b;
+  --workspace-muted: #64748b;
+  --workspace-border: #e2e8f0;
+  --workspace-blue: #2563eb;
+  --workspace-blue-soft: #eff6ff;
+  --workspace-radius: 12px;
+}
+
+/* Shared shell decoration; component dimensions and media canvases stay intact. */
+#app .home,
+#app .home > :is(.home_content, .home_content1) {
+  background-color: var(--workspace-page);
+}
+#app .home .menu_content_title {
+  color: var(--workspace-text);
+  letter-spacing: .15px;
+}
+#app .home .home_menu {
+  border-right-color: var(--workspace-border);
+}
+#app .home .home_menu :is(.el-menu-item, .el-submenu__title) {
+  border-radius: 8px;
+}
+
+/* Replace the original absolute 70px toolbar / floated fixed-size cards.
+   The #app prefix overrides the repeated scope attributes in the live Vue CSS. */
+#app .home .contents > #modelSmall {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0;
+  background: transparent;
+  color: var(--workspace-text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+#app .home #modelSmall > .search {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px 24px;
+  width: 100%;
+  height: auto;
+  min-height: 76px;
+  padding: 18px 20px;
+  box-sizing: border-box;
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius);
+  background: var(--workspace-surface);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 3%);
+}
+
+#app .home #modelSmall > .search > .jia_tab {
+  float: none;
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: auto;
+  min-width: 0;
+}
+
+#app .home #modelSmall > .search .jia_tab .el-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-height: 32px;
+  max-width: 100%;
+  margin: 0;
+  padding: 5px 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background-color .15s;
+}
+
+#app .home #modelSmall > .search .jia_tab .el-tag:hover {
+  border-color: #b7cef9;
+  background: var(--workspace-blue-soft);
+  color: var(--workspace-blue);
+}
+
+#app .home #modelSmall > .search > .demo-ruleForm0 {
+  float: none;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+#app .home #modelSmall > .search .el-form-item {
+  margin: 0;
+}
+#app .home #modelSmall > .search .el-form-item__content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+  line-height: 32px;
+}
+#app .home #modelSmall > .search .el-button {
+  min-height: 34px;
+  margin: 0;
+  padding: 8px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+#app .home #modelSmall > .search .el-button--primary {
+  border-color: #dce5f0;
+  background: #fff;
+  color: #475569;
+}
+#app .home #modelSmall > .search .el-button--primary:hover {
+  border-color: #b7cef9;
+  background: var(--workspace-blue-soft);
+  color: var(--workspace-blue);
+}
+#app .home #modelSmall > .search .el-button--success {
+  border-color: var(--workspace-blue);
+  background: var(--workspace-blue);
+  color: #fff;
+}
+#app .home #modelSmall > .search .el-button--success:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+#app .home #modelSmall > .cardCon {
+  position: relative;
+  inset: auto;
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
+  grid-auto-rows: minmax(min-content, auto);
+  align-content: start;
+  align-items: stretch;
+  gap: 18px;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 1px 4px 18px 1px;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+#app .home #modelSmall > .cardCon > .card {
+  float: none;
+  display: flex;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  margin: 0;
+}
+#app .home #modelSmall .card > .data-card {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 222px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius);
+  background: var(--workspace-surface);
+  background-image: none;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 3%);
+  transform: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+#app .home #modelSmall .card > .data-card:hover {
+  border-color: #bfd1ed;
+  box-shadow: 0 5px 18px rgb(30 58 95 / 7%);
+  transform: none;
+}
+
+#app .home #modelSmall .data-card > .card-content {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 1fr auto;
+  gap: 0 10px;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  padding: 20px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+#app .home #modelSmall .card-content > ul {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+#app .home #modelSmall .card-content > ul > li {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+#app .home #modelSmall .card-content > ul > li:first-child {
+  display: inline-block;
+  max-width: 100%;
+  margin-bottom: 14px;
+  padding: 3px 9px;
+  box-sizing: border-box;
+  border: 1px solid #dbe7fd;
+  border-radius: 5px;
+  background: var(--workspace-blue-soft);
+  color: var(--workspace-blue) !important;
+  font-size: 11px;
+  font-weight: 600 !important;
+  line-height: 20px;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(2) {
+  margin-bottom: 16px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #edf1f6;
+  color: var(--workspace-text);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(2) > strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--workspace-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(n + 3) {
+  padding: 7px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 12px;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(n + 3):last-child {
+  border-bottom: 0;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(n + 3) > div {
+  display: grid;
+  grid-template-columns: minmax(86px, 42%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+#app .home #modelSmall .card-content > ul > li:nth-child(n + 3) strong {
+  min-width: 0;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* Inline absolute dimensions in DataCard.vue are intentionally reset here. */
+#app .home #modelSmall .card-content > .el-button {
+  position: static !important;
+  inset: auto !important;
+  grid-row: 2;
+  width: auto !important;
+  min-width: 0;
+  height: 34px !important;
+  min-height: 34px;
+  margin: 0 !important;
+  padding: 8px 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 16px;
+}
+#app .home #modelSmall .card-content > .el-button--primary {
+  grid-column: 2;
+  border-color: #dbe7fd;
+  background: var(--workspace-blue-soft);
+  color: var(--workspace-blue);
+}
+#app .home #modelSmall .card-content > .el-button--primary:hover {
+  border-color: var(--workspace-blue);
+  background: var(--workspace-blue);
+  color: #fff;
+}
+#app .home #modelSmall .card-content > .el-button:not(.el-button--primary) {
+  grid-column: 1;
+}
+#app .home #modelSmall .card-content > .el-button:not(.el-button--primary):hover {
+  border-color: #f0c1bc;
+  background: #fff4f2;
+  color: #b42318;
+}
+
+/* Both existing edit dialogs remain under #modelSmall (append-to-body is false). */
+#app .home #modelSmall > .el-dialog__wrapper > .el-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 48px)) !important;
+  max-width: none;
+  max-height: calc(100vh - 64px);
+  margin-top: 32px !important;
+  margin-bottom: 32px !important;
+  border-radius: var(--workspace-radius);
+  background: #fff;
+  box-shadow: 0 18px 60px rgb(15 23 42 / 20%);
+  overflow: hidden;
+}
+#app .home #modelSmall .el-dialog > .el-dialog__header {
+  flex: 0 0 auto;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--workspace-border);
+  background: #fff !important;
+}
+#app .home #modelSmall .el-dialog__title {
+  padding-left: 0;
+  border-left: 0;
+  color: var(--workspace-text);
+  font-size: 17px;
+  font-weight: 600;
+}
+#app .home #modelSmall .el-dialog__headerbtn {
+  top: 23px;
+  right: 24px;
+}
+#app .home #modelSmall .el-dialog > .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding: 24px;
+  overflow-y: auto;
+  color: #475569;
+}
+#app .home #modelSmall .el-dialog > .el-dialog__footer {
+  flex: 0 0 auto;
+  padding: 16px 24px;
+  border-top: 1px solid var(--workspace-border);
+  background: #f8fafc;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+#app .home #modelSmall .el-dialog .el-form-item {
+  min-width: 0;
+  margin-bottom: 20px;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item {
+  margin: 0;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(n + 3) {
+  grid-column: 1 / -1;
+  padding-top: 20px;
+  border-top: 1px solid #edf1f6;
+}
+#app .home #modelSmall .el-dialog .el-form-item__label {
+  padding-bottom: 6px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 22px;
+}
+#app .home #modelSmall .el-dialog .el-select {
+  width: 100%;
+}
+#app .home #modelSmall .el-dialog .el-input__inner {
+  height: 38px;
+  border-color: #d5dfec;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--workspace-text);
+  font-size: 13px;
+}
+#app .home #modelSmall .el-dialog .el-input__inner:focus {
+  border-color: #7ea4ed;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 10%);
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, .75fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  line-height: 24px;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top .el-form-item__content::before,
+#app .home #modelSmall .el-dialog .el-form--label-top .el-form-item__content::after {
+  display: none;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > div:not(.el-input) {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > div:not(.el-input) > div {
+  display: grid;
+  grid-template-columns: minmax(90px, .8fr) minmax(0, 1fr) 32px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #e6edf5;
+  border-radius: 7px;
+  background: #f8fafc;
+  overflow-wrap: anywhere;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) strong {
+  min-width: 0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > div[style*="color"] {
+  padding: 8px 11px;
+  border: 1px solid #f5e5c4;
+  border-radius: 6px;
+  background: #fffaf0;
+  color: #986212 !important;
+  font-size: 12px;
+  line-height: 20px;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > .el-input {
+  width: 100% !important;
+  min-width: 0;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) .el-button.is-circle {
+  float: none !important;
+  width: 32px;
+  height: 32px;
+  margin: 0 !important;
+  padding: 8px;
+  border-radius: 6px;
+}
+#app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) .el-button--success.is-circle {
+  width: 38px;
+  height: 38px;
+  border-color: var(--workspace-blue);
+  background: var(--workspace-blue);
+}
+#app .home #modelSmall .el-dialog__footer .el-button {
+  min-height: 36px;
+  padding: 9px 20px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+#app .home #modelSmall .el-dialog__footer .el-button--primary {
+  border-color: var(--workspace-blue);
+  background: var(--workspace-blue);
+}
+#app .home #modelSmall .el-button:focus-visible,
+#app .home #modelSmall .el-tag:focus-visible {
+  outline: 3px solid #bfdbfe;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  #app .home #modelSmall > .search { flex-wrap: wrap; }
+  #app .home #modelSmall > .search > .jia_tab { flex-basis: 100%; }
+  #app .home #modelSmall > .search > .demo-ruleForm0 { margin-left: auto; }
+}
+@media (max-width: 680px) {
+  #app .home .contents > #modelSmall { gap: 12px; }
+  #app .home #modelSmall > .search { gap: 12px; min-height: 0; padding: 14px; }
+  #app .home #modelSmall > .search .jia_tab .el-tag { padding: 4px 9px; }
+  #app .home #modelSmall > .cardCon { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-bottom: 12px; }
+  #app .home #modelSmall .data-card > .card-content { padding: 16px; }
+  #app .home #modelSmall > .el-dialog__wrapper > .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 24px);
+    margin-top: 12px !important;
+    margin-bottom: 12px !important;
+  }
+  #app .home #modelSmall .el-dialog > .el-dialog__header { padding: 17px 18px; }
+  #app .home #modelSmall .el-dialog__headerbtn { top: 20px; right: 18px; }
+  #app .home #modelSmall .el-dialog > .el-dialog__body { padding: 18px; }
+  #app .home #modelSmall .el-dialog > .el-dialog__footer { padding: 14px 18px; }
+  #app .home #modelSmall .el-dialog .el-form--label-top { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  #app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content {
+    grid-template-columns: minmax(0, 1fr) 38px;
+  }
+  #app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > .el-input {
+    grid-column: 1 / -1;
+  }
+  #app .home #modelSmall .el-dialog .el-form--label-top > .el-form-item:nth-child(3) > .el-form-item__content > .el-input:nth-last-child(2) {
+    grid-column: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app .home #modelSmall .data-card,
+  #app .home #modelSmall > .search .jia_tab .el-tag { transition: none; }
+}
+
+/* Keep the template workspace usable in a narrow pane without altering media pages. */
+@media (max-width: 760px) {
+  #app .home:has(.contents > #modelSmall) {
+    --platform-sidebar: 0px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #app .home:has(.contents > #modelSmall) > .home_menu {
+    display: none;
+  }
+  #app .home:has(.contents > #modelSmall) > :is(.home_content, .home_content1) {
+    grid-column: 1 / -1;
+    min-width: 0;
+    width: 100%;
+  }
+  #app .home:has(.contents > #modelSmall) .menu_content,
+  #app .home:has(.contents > #modelSmall) .contents {
+    min-width: 0;
+    max-width: 100%;
+  }
+  #app .home:has(.contents > #modelSmall) > .home_title {
+    min-width: 0;
+    gap: 4px;
+  }
+  #app .home:has(.contents > #modelSmall) .home_title .title {
+    flex: 1 1 145px;
+    min-width: 0;
+    width: auto;
+  }
+  #app .home:has(.contents > #modelSmall) .home_title .title img {
+    max-width: 100%;
+  }
+}

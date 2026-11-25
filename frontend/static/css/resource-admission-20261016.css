@@ -1,0 +1,9 @@
+#app .algorithm-resource-status {
+  clear: both;
+  padding-top: 5px;
+  color: #697b98;
+  font-size: 12px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.el-cascader-node.is-disabled { cursor: not-allowed; }

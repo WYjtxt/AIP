@@ -1,0 +1,13 @@
+[Unit]
+Description=Ensure BM1684X Sophon devices are ready and start aiplatform-algorithm-master
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aiplatform-sophon-ready.sh
+RemainAfterExit=yes
+TimeoutStartSec=330
+
+[Install]
+WantedBy=multi-user.target

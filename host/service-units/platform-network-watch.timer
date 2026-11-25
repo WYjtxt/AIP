@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch platform network handovers
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=3s
+AccuracySec=1s
+Unit=platform-network-watch.service
+[Install]
+WantedBy=timers.target

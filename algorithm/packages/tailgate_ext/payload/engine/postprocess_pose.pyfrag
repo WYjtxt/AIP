@@ -1,0 +1,47 @@
+def postprocess_pose(pred, img_w, img_h, ratio, txy, conf_thresh, nms_thresh,
+                     kpt_num=17, max_det=300):
+    '''YOLOv8-pose 单输出解码：置信度过滤 → NMS → letterbox 逆映射（框与关键点一起回原图）。
+    pred: (num_boxes, 4+nc+3*kpt)，前 4 列 xywh，接着 nc 列类别得分，再接着 kpt 个 [x,y,conf]。
+    返回 (boxes[[x1,y1,x2,y2]...], classes, scores, keypoints[N,kpt_num,3])；无结果四者均 None。'''
+    if pred is None or pred.size == 0:
+        return None, None, None, None
+    dim = int(pred.shape[1])
+    kpt_dim = int(kpt_num) * 3
+    nc = dim - 4 - kpt_dim
+    if nc < 1:
+        raise ValueError('姿态模型输出维度 %d 无法拆出 %d 个关键点（应为 4+nc+%d）'
+                         % (dim, kpt_num, kpt_dim))
+    cls_scores = pred[:, 4:4 + nc]
+    scores = cls_scores.max(axis=1)
+    keep = scores >= conf_thresh
+    if not keep.any():
+        return None, None, None, None
+    scores = scores[keep]
+    classes = cls_scores[keep].argmax(axis=1)
+    boxes = xywh2xyxy(pred[keep, :4])
+    keypoints = pred[keep, 4 + nc:].reshape(-1, int(kpt_num), 3).copy()
+    offset = classes.astype(np.float32) * _NMS_CLASS_OFFSET
+    keep_idx = nms_boxes(boxes + offset[:, None], scores, nms_thresh)
+    if keep_idx.size == 0:
+        return None, None, None, None
+    if keep_idx.size > max_det:
+        keep_idx = keep_idx[:max_det]
+    boxes = boxes[keep_idx]
+    classes = classes[keep_idx]
+    scores = scores[keep_idx]
+    keypoints = keypoints[keep_idx]
+    # letterbox 逆映射：框与关键点用同一组 ratio/txy
+    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - txy[0]) / ratio[0]
+    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - txy[1]) / ratio[1]
+    keypoints[:, :, 0] = (keypoints[:, :, 0] - txy[0]) / ratio[0]
+    keypoints[:, :, 1] = (keypoints[:, :, 1] - txy[1]) / ratio[1]
+    keypoints[:, :, 0] = np.clip(keypoints[:, :, 0], 0, img_w)
+    keypoints[:, :, 1] = np.clip(keypoints[:, :, 1], 0, img_h)
+    new_boxes = []
+    for box in boxes:
+        xmin = max(0, int(box[0]))
+        ymin = max(0, int(box[1]))
+        xmax = min(img_w, int(box[2]))
+        ymax = min(img_h, int(box[3]))
+        new_boxes.append([xmin, ymin, xmax, ymax])
+    return new_boxes, classes, scores, keypoints

@@ -1,0 +1,43 @@
+/* Only the mounted-filesystem disclosure controls on StorageManagement. */
+.storage-management .storage-disk-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.storage-management .storage-disk-controls > span { margin-right: auto; }
+.storage-management .storage-disk-heading { margin-bottom: 10px; }
+.storage-management .storage-disk-heading > h3 { min-width: 0; }
+.storage-management .storage-disk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.storage-management .storage-disk-toggle:hover { color: #2563eb; }
+.storage-management .storage-disk-toggle:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 4px;
+}
+.storage-management .storage-disk-chevron { flex: 0 0 12px; color: #64748b; }
+.storage-management .storage-disk-name { min-width: 0; overflow-wrap: anywhere; }
+.storage-management .storage-disk-action { flex-shrink: 0; color: #64748b; font-size: 12px; font-weight: 400; }
+.storage-management .storage-disk-summary { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0 0 12px; font-size: 13px; }
+.storage-management .storage-disk-summary strong { color: #334155; }
+.storage-management .storage-disk-details { margin-top: 14px; border-top: 1px solid #edf2f7; padding-top: 2px; }
+.storage-management .storage-disk-details[hidden] { display: none !important; }
+.storage-management .storage-disk-details .storage-metrics { margin-bottom: 0; }
+@media (max-width: 700px) {
+  .storage-management .storage-disk-controls > span { flex-basis: 100%; }
+  .storage-management .storage-disk-heading { align-items: flex-start; gap: 8px; }
+  .storage-management .storage-disk-summary { gap: 6px 14px; }
+}

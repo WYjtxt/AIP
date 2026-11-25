@@ -1,0 +1,11 @@
+[Unit]
+Description=Recover platform network handovers
+After=NetworkManager.service
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+TimeoutStartSec=55
+Environment="PLATFORM_NATIVE_ROOT=/data/AIGO/platform_start"
+Environment="PLATFORM_OPS_STATE_DIR=/data/AIGO/platform_start/platform_ops/state"
+ExecStart="/usr/bin/python3" "/data/AIGO/platform_start/platform_ops/platform_network_operations.py" --tick

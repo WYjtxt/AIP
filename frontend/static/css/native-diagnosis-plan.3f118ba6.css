@@ -1,0 +1,14 @@
+/* Native diagnosis plan dialog only. */
+.native-diagnosis-plan.el-dialog{width:min(1000px,calc(100vw - 32px))!important;max-height:92vh;display:flex;flex-direction:column;margin-top:4vh!important;margin-bottom:4vh!important}
+.native-diagnosis-plan>.el-dialog__header,.native-diagnosis-plan>.el-dialog__footer{flex:0 0 auto}
+.native-diagnosis-plan>.el-dialog__body{overflow:auto;min-height:0;padding:14px 22px}
+.native-diagnosis-plan>.el-dialog__body>br{display:none}
+.native-diagnosis-plan .jia_boxF[data-v-6c4f7c9f]{height:auto;max-height:380px;overflow:auto;display:grid;grid-template-columns:150px minmax(200px,1fr);gap:12px;margin:10px 0}
+.native-diagnosis-plan .jia_boxF .jia_left[data-v-6c4f7c9f],.native-diagnosis-plan .jia_boxF .jia_right[data-v-6c4f7c9f]{position:static;width:auto;height:auto}
+.native-diagnosis-plan .jia_boxF .jia_right[data-v-6c4f7c9f]{padding-top:40px}
+.native-diagnosis-plan .jia_boxF .jia_left>.el-checkbox{height:40px!important}
+.native-diagnosis-plan .content_right[data-v-6c4f7c9f]{height:auto;margin:10px 0}
+.native-diagnosis-plan .transferTreeBox[data-v-6c4f7c9f]{width:100%;max-width:750px;margin:0 auto;gap:12px}
+.native-diagnosis-plan .transferTreeBox .SelectBox[data-v-6c4f7c9f]{width:calc((100% - 110px)/2);color:#303133}
+.native-diagnosis-plan .jia_form .el-form-item{max-width:calc(50% - 16px)}
+@media(max-width:650px){.native-diagnosis-plan .jia_form .el-form-item{width:100%;max-width:100%;margin-right:0}.native-diagnosis-plan .jia_boxF[data-v-6c4f7c9f]{grid-template-columns:115px minmax(150px,1fr)}}

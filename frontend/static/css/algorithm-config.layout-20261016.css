@@ -1,0 +1,228 @@
+/* Algorithm configuration pages only. No canvas/image dimensions or event behavior change. */
+#app .home .algorithm-config-page > .sfpzs {
+  width: 100% !important;
+  max-width: 1280px !important;
+  height: auto !important;
+  margin: 0 auto !important;
+  padding: 6px 20px 28px !important;
+  box-sizing: border-box;
+}
+#app .home .algorithm-config-model {
+  height: auto !important;
+  overflow: visible !important;
+}
+#app .home .algorithm-config-model > .sfpzs {
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 16px;
+  align-items: start;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > .el-form-item {
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding-top: 0 !important;
+  min-width: 0;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > :is(div:not(.el-form-item), .el-divider, .algorithm-form-actions) {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .el-form-item__label {
+  display: block;
+  width: auto !important;
+  float: none !important;
+  padding: 0 0 5px !important;
+  color: #42516a;
+  font-size: 13px;
+  line-height: 21px;
+  text-align: left;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .el-form-item__content {
+  margin-left: 0 !important;
+  min-width: 0;
+  line-height: 32px;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .el-form-item__content > :is(.el-input, .el-select, .el-cascader, .el-input-number, .el-textarea, .el-date-editor) {
+  width: 100% !important;
+  max-width: none !important;
+  margin-right: 0 !important;
+  float: none !important;
+  vertical-align: top;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) :is(.algorithm-field-hint, .algorithm-stream-help) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 4px 0 0 !important;
+  font-size: 12px;
+  line-height: 19px;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > div[style*="dashed"]:not(.algorithm-drawing-scroll):not([style*="display: none"]):not([style*="display:none"]) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  padding: 16px;
+  box-sizing: border-box;
+  border: 1px solid #e1e8f2 !important;
+  border-radius: 8px !important;
+  background: #f8faff !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > div[style*="dashed"]:not(.algorithm-drawing-scroll) > .el-form-item {
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: 0;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > div[style*="dashed"]:not(.algorithm-drawing-scroll) > div:not(.el-form-item) {
+  grid-column: 1 / -1;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .form-group {
+  display: grid;
+  grid-template-columns: 20px minmax(130px, 1fr) minmax(180px, 1.7fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .form-group > :is(.el-input, .el-button) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+#app .home .algorithm-config-page .algorithm-model-selector > .el-form-item__content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+#app .home .algorithm-config-page .algorithm-model-selector > .el-form-item__content::before,
+#app .home .algorithm-config-page .algorithm-model-selector > .el-form-item__content::after {
+  display: none;
+}
+#app .home .algorithm-config-page .algorithm-model-selector > .el-form-item__content > .el-select {
+  flex: 1 1 220px;
+  width: auto !important;
+}
+#app .home .algorithm-config-page .algorithm-model-actions {
+  flex: 0 0 auto;
+  margin: 0 !important;
+}
+#app .home .algorithm-config-page .btnlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 !important;
+}
+#app .home .algorithm-config-page .btnlist > div {
+  margin: 0 !important;
+  padding: 7px 14px !important;
+  line-height: 20px;
+}
+#app .home .algorithm-config-page .algorithm-model-panel {
+  margin-top: 0 !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll {
+  display: grid;
+  grid-template-columns: 640px minmax(260px, 1fr);
+  align-items: start;
+  gap: 18px;
+  height: auto !important;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow: auto !important;
+  border: 1px solid #e1e8f2 !important;
+  border-radius: 8px !important;
+  background: #f8faff !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div {
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:first-child {
+  min-width: 640px !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:first-child > div:first-child {
+  float: none !important;
+  width: fit-content !important;
+  height: auto !important;
+  margin: 0 0 10px !important;
+  padding: 4px 10px;
+  font-size: 12px !important;
+  line-height: 20px;
+  border: 1px solid #b6c9f5 !important;
+  border-radius: 5px;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:first-child > div:nth-child(2) {
+  float: none !important;
+  width: 640px !important;
+  height: 419px !important;
+  margin: 0 !important;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:nth-child(2) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:nth-child(2) > div {
+  display: contents;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:nth-child(2) > div > .el-form-item {
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: 0;
+}
+#app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:nth-child(2) > div > div:not(.el-form-item) {
+  display: none;
+}
+#app .home .algorithm-config-page .algorithm-action-buttons {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 14px 0 0 !important;
+}
+@media (max-width: 1280px) {
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 1000px) {
+  #app .home .algorithm-config-page > .sfpzs {
+    padding: 4px 14px 24px !important;
+  }
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 14px;
+  }
+}
+@media (max-width: 760px) {
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) > .sfpzs > .el-form > div[style*="dashed"]:not(.algorithm-drawing-scroll):not([style*="display: none"]):not([style*="display:none"]) {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+  }
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll {
+    padding: 12px;
+  }
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .form-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .form-group > span {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 520px) {
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .form-group > .el-input,
+  #app .home :is(.algorithm-config-page, .algorithm-config-model) .algorithm-drawing-scroll > div:nth-child(2) > div > .el-form-item {
+    grid-column: 1 / -1;
+  }
+}

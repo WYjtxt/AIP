@@ -1,0 +1,42 @@
+/* The initial machine request QR belongs to the activation panel. */
+#app .container.activation-page {
+  min-height: 720px;
+}
+#app .activation-page .activation-box {
+  width: 580px;
+  max-width: calc(100vw - 32px);
+  height: 590px;
+  padding: 92px 32px 30px;
+}
+#app .activation-box .activate {
+  text-align: center;
+  line-height: 1.75;
+}
+#app .activation-box .btns { height: 80px; }
+#app .activation-box .activation-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 0 auto;
+  color: #e8eef4;
+  text-align: center;
+}
+#app .activation-box .activation-qr img {
+  display: block;
+  width: 232px;
+  height: 232px;
+  max-width: 100%;
+  object-fit: contain;
+  background: white;
+  image-rendering: pixelated;
+}
+#app .activation-box .activation-qr p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+@media (max-width: 680px) {
+  #app .activation-page .activation-box { padding: 75px 20px 30px; }
+  #app .activation-page .company { bottom: 20px; }
+}

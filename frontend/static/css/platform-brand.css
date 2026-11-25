@@ -1,0 +1,36 @@
+/* Shared product name. Keep business layouts and media geometry unchanged. */
+#app .home .home_title .title.platform-brand {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 10px; width: auto !important; max-width: 420px; min-width: 0;
+  flex: 1 1 auto; padding-left: 20px; box-sizing: border-box;
+}
+#app .home .home_title .title.platform-brand .platform-brand__icon {
+  display: block; width: 32px !important; max-width: none !important; height: 32px !important;
+  flex: 0 0 32px; object-fit: contain;
+}
+#app .platform-brand__name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #fff; font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 19px; line-height: 1.4; font-weight: 600; letter-spacing: .4px;
+}
+#app .container .login_icon.platform-brand {
+  display: flex; align-items: center; gap: 12px;
+  width: auto; max-width: calc(100% - 60px); height: 38px; scale: 1;
+}
+#app .container .login_icon.platform-brand .platform-brand__icon {
+  display: block; width: 36px; height: 36px; flex: 0 0 36px; object-fit: contain;
+}
+#app .container .login_icon.platform-brand .platform-brand__name { font-size: 24px; }
+@media (max-width: 680px) {
+  /* The icon brand already names the product on narrow login screens. */
+  #app .container .form-box > .title-box { display: none; }
+  #app .home .home_title .title.platform-brand { gap: 7px; padding-left: 12px; }
+  #app .home .home_title .title.platform-brand .platform-brand__icon {
+    width: 28px !important; height: 28px !important; flex-basis: 28px;
+  }
+  #app .home .home_title .title.platform-brand .platform-brand__name {
+    font-size: 16px; letter-spacing: 0;
+  }
+  #app .container .login_icon.platform-brand { left: 24px; gap: 9px; max-width: calc(100% - 48px); }
+  #app .container .login_icon.platform-brand .platform-brand__name { font-size: 21px; }
+}

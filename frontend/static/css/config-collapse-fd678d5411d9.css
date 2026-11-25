@@ -1,0 +1,15 @@
+/* Presentation-only folds: fields remain mounted so draft values survive. */
+.config-fold-heading{display:flex;align-items:center;gap:12px;width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;}
+.config-fold-heading:focus-visible{outline:2px solid #8bb1ff;outline-offset:6px;border-radius:4px;}
+.config-fold-caption{display:flex;flex:1;min-width:0;flex-wrap:wrap;align-items:center;gap:5px 12px;}
+.config-fold-title{display:block;width:100%;font-size:15px;font-weight:600;line-height:1.6;color:#203757;}
+.config-fold-summary{font-size:12px;line-height:1.7;color:#6c7c94;overflow-wrap:anywhere;}
+.config-fold-action{flex-shrink:0;color:#4267b5;font-size:12px;white-space:nowrap;}
+.config-fold-dirty{display:inline-block;font-size:12px;color:#a25e10;background:#fff5df;padding:1px 6px;border-radius:4px;}
+.config-fold-body{margin-top:16px;}
+.config-fold-body[hidden]{display:none!important;}
+.resource-settings .config-fold-body>p{margin-left:40px;}
+.config-fold-toolbar{display:flex;justify-content:flex-end;gap:8px;width:100%;max-width:960px;box-sizing:border-box;margin:0 auto 12px;}
+.site-services-fold .config-fold-title{font-size:16px;}
+.site-services-fold .config-fold-body>p{margin-bottom:16px;}
+@media(max-width:760px){.resource-settings .config-fold-body>p{margin-left:0;}}

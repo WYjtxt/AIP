@@ -1,0 +1,16 @@
+{
+  "model": "阳光三极_闸机尾随_深度适配类_闸机尾随_闸机尾随_yolov11s_int8_sophon_bm1684x_V1.0_1_1_20260922_1.bmodel",
+  "library": {
+    "algorithm_file_name": "阳光三极_闸机尾随_深度适配类_闸机尾随_闸机尾随_yolov11s_int8_sophon_bm1684x_V1.0_1_1_20260922_1.bmodel",
+    "algorithm_type": "2",
+    "algorithm_type_list": "['renyuan']",
+    "algorithm_version": "V1.0",
+    "algorithm_status": "1",
+    "algorithm_trade_type": "2",
+    "model_type_name": "深度适配类",
+    "model_name": "闸机尾随",
+    "analysis_type": "闸机尾随",
+    "algorithm_name": "阳光三极_闸机尾随_深度适配类_闸机尾随_闸机尾随_yolov11s_int8_sophon_bm1684x_V1.0_1_1_20260922_1"
+  },
+  "list_data": "[{\"尾随时间窗\":[\"5\",\"秒；相邻两次通行间隔小于该值判定为尾随。取值范围：(1-60)\"]},{\"稳定帧数\":[\"5\",\"区域连续命中帧数。取值范围：(1-30)\"]},{\"会话超时\":[\"10\",\"尾随会话结束并上报的超时秒数。取值范围：(3-120)\"]}]"
+}

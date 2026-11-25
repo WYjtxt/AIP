@@ -1,0 +1,83 @@
+/* Task information and model settings share the upper row; drawing stays full width. */
+#app .home .algorithm-config-split > .sfpzs {
+  max-width: 1120px !important;
+}
+#app .home .algorithm-config-split .algorithm-config-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+#app .home .algorithm-config-split .algorithm-top-with-model {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+}
+#app .home .algorithm-config-split .algorithm-config-top:not(.algorithm-top-with-model) {
+  max-width: 640px;
+  margin: 0 auto;
+}
+#app .home .algorithm-config-split :is(.algorithm-basic-panel, .algorithm-model-settings) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 16px 18px 18px;
+  border: 1px solid #e1e8f2;
+  border-radius: 8px;
+  background: #fff;
+  box-sizing: border-box;
+}
+#app .home .algorithm-config-split .algorithm-model-settings {
+  background: #f8faff;
+}
+#app .home .algorithm-config-split .algorithm-panel-title {
+  margin: 0 0 2px;
+  color: #30445f;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+}
+#app .home .algorithm-config-split :is(.algorithm-basic-panel, .algorithm-model-settings) .el-form-item {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding-top: 0 !important;
+  min-width: 0;
+}
+#app .home .algorithm-config-split .algorithm-model-settings > div {
+  width: 100% !important;
+  min-width: 0;
+  margin: 0 !important;
+}
+#app .home .algorithm-config-split .algorithm-model-settings > div[style*="dashed"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+#app .home .algorithm-config-split .algorithm-model-settings > div[style*="dashed"] > div:not(.el-form-item) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#app .home .algorithm-config-split .algorithm-model-settings .form-group {
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr);
+}
+#app .home .algorithm-config-split .algorithm-model-settings .form-group > .el-input {
+  grid-column: 2;
+}
+#app .home .algorithm-config-split .algorithm-model-settings .form-group > .el-input + .el-input {
+  grid-column: 3;
+}
+@media (max-width: 1050px) {
+  #app .home .algorithm-config-split .algorithm-top-with-model {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  #app .home .algorithm-config-split :is(.algorithm-basic-panel, .algorithm-model-settings) {
+    padding: 12px;
+  }
+}

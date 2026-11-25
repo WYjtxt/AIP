@@ -1,0 +1,2 @@
+# Preserve the verified release bytes, including Linux scripts, on every checkout.
+* -text

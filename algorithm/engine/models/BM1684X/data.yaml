@@ -1,0 +1,10 @@
+lables:
+- lable: renyuan
+  name: 人员
+names:
+- renyuan
+nc: 1
+path: /data/images/1/1xlj484/V1.0/data_s
+test: images/test
+train: images/train
+val: images/val

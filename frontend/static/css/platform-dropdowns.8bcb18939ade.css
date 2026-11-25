@@ -1,0 +1,20 @@
+/* Keep populated Element UI dropdowns responsive without delaying keyboard input. */
+.el-select-dropdown.el-zoom-in-top-enter-active,
+.el-select-dropdown.el-zoom-in-top-leave-active,
+.el-cascader__dropdown.el-zoom-in-top-enter-active,
+.el-cascader__dropdown.el-zoom-in-top-leave-active,
+.el-dropdown-menu.el-zoom-in-top-enter-active,
+.el-dropdown-menu.el-zoom-in-top-leave-active {
+  transition-duration: 100ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .el-select-dropdown.el-zoom-in-top-enter-active,
+  .el-select-dropdown.el-zoom-in-top-leave-active,
+  .el-cascader__dropdown.el-zoom-in-top-enter-active,
+  .el-cascader__dropdown.el-zoom-in-top-leave-active,
+  .el-dropdown-menu.el-zoom-in-top-enter-active,
+  .el-dropdown-menu.el-zoom-in-top-leave-active {
+    transition-duration: 0ms;
+  }
+}

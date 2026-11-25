@@ -1,0 +1,42 @@
+.device-monitor { width: 100%; height: 100%; overflow: auto; padding: 14px; box-sizing: border-box; border-radius: 6px; background: #f5f7fb; color: #303133; }
+.device-monitor * { box-sizing: border-box; }
+.device-monitor .monitor-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: #fff; border: 1px solid #e4e9f1; border-radius: 6px; }
+.device-monitor .monitor-toolbar-title { display: flex; flex-direction: column; gap: 4px; }
+.device-monitor .monitor-toolbar-title strong { font-size: 15px; color: #232e66; }
+.device-monitor .monitor-toolbar-title span { color: #8691a3; font-size: 12px; }
+.device-monitor .monitor-refresh-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+.device-monitor .monitor-refresh-controls .el-button { margin-left: 0; }
+.device-monitor .monitor-interval-select { width: 108px; }
+.device-monitor .monitor-custom-interval { width: 82px; height: 32px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px; }
+.device-monitor .monitor-refresh-status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 2px; font-size: 12px; color: #7b8799; }
+.device-monitor .monitor-alert { margin-bottom: 10px; padding: 9px 12px; border: 1px solid #ffe3ad; border-radius: 5px; background: #fff8e8; color: #8a5c0c; font-size: 12px; }
+.device-monitor .monitor-hosts { border: 0; }
+.device-monitor .el-collapse-item { margin-bottom: 14px; border: 1px solid #e1e7f0; border-radius: 6px; overflow: hidden; background: #fff; }
+.device-monitor .el-collapse-item__header { height: auto; min-height: 120px; padding: 16px; line-height: 1.5; border-bottom-color: #edf0f5; }
+.device-monitor .el-collapse-item__content { padding-bottom: 0; }
+.device-monitor .el-collapse-item__wrap { border-bottom: 0; }
+.device-monitor .monitor-host-header { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(190px,1.2fr) repeat(2,minmax(140px,1fr)); align-items: center; gap: 26px; padding-right: 18px; }
+.device-monitor .monitor-host-identity { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.device-monitor .monitor-host-identity strong { font-size: 16px; color: #232e66; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.device-monitor .monitor-host-identity span { font-size: 12px; color: #7b8799; }
+.device-monitor .monitor-host-identity .monitor-host-status { display: inline-block; padding: 1px 7px; color: #26805f; background: #eaf8f1; border-radius: 3px; }
+.device-monitor .monitor-host-identity .monitor-host-status.is-warning { color: #9b6b24; background: #fff3df; }
+.device-monitor .monitor-host-metric { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.device-monitor .monitor-metric-label { color: #65728a; font-size: 13px; }
+.device-monitor .monitor-metric-label small { margin-left: 5px; color: #9ba5b4; font-size: 11px; }
+.device-monitor .monitor-host-metric strong { font-size: 26px; line-height: 1.2; color: #0569ff; font-weight: 600; }
+.device-monitor .monitor-missing { min-height: 7px; color: #a2abba; font-size: 11px; }
+.device-monitor .monitor-host-details { padding: 0 16px 16px; }
+.device-monitor .monitor-collection-info { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 10px 0; color: #8994a5; font-size: 12px; }
+.device-monitor .monitor-host-error { padding-bottom: 8px; color: #b67936; font-size: 12px; }
+.device-monitor .monitor-card-caption { display: flex; flex-wrap: wrap; gap: 7px 14px; align-items: center; padding: 5px 0 10px; font-size: 12px; color: #8994a5; }
+.device-monitor .monitor-card-caption strong { color: #53617c; font-size: 13px; }
+.device-monitor .monitor-stale { color: #c5893e; }
+.device-monitor .monitor-chip-stale { display: block; margin-top: 3px; color: #c5893e; font-size: 10px; }
+.device-monitor .monitor-card-table .el-table__header th { background: #f5f8ff; color: #53617c; }
+.device-monitor .monitor-card-table .el-table__cell { padding: 12px 0; }
+.device-monitor .monitor-card-metric { display: flex; flex-direction: column; gap: 5px; max-width: 180px; margin: 0 auto; }
+.device-monitor .monitor-card-metric strong { font-size: 13px; color: #53617c; }
+.device-monitor .monitor-empty { padding: 50px 20px; border: 1px solid #e1e7f0; border-radius: 6px; background: #fff; color: #8994a5; text-align: center; }
+@media (max-width: 1000px) { .device-monitor .monitor-host-header { gap: 18px; grid-template-columns: minmax(165px,1fr) repeat(2,minmax(115px,1fr)); } .device-monitor .monitor-host-metric strong { font-size: 23px; } }
+@media (max-width: 700px) { .device-monitor { padding: 8px; } .device-monitor .monitor-host-header { grid-template-columns: repeat(2,minmax(100px,1fr)); gap: 14px; } .device-monitor .monitor-host-identity { grid-column: 1 / -1; } .device-monitor .el-collapse-item__header { padding: 12px; } .device-monitor .monitor-host-details { padding: 0 10px 10px; } }
