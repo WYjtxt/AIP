@@ -74,10 +74,8 @@
       records: function () { return this.status ? this.status[this.tab === 'failures' ? 'failures' : 'recent'] || [] : []; },
       canTest: function () { return !!(this.status && this.status.settings.enabled && this.status.worker.healthy && !this.dirty && !this.newConfig); },
       canDeleteSelected: function () {
-        var vm = this;
-        if (!this.status || this.status.can_delete !== true || !this.selected.length || this.selected.length > 200) return false;
-        var failed = this.records.filter(function (row) {return row.state === 'failed';}).map(function (row) {return row.id;});
-        return this.selected.every(function (id) {return failed.indexOf(id) >= 0;});
+        return !!(this.status && this.status.can_delete === true && this.selected.length > 0 &&
+          this.selected.length <= 200 && this.selectedRetryable.length === this.selected.length);
       },
       selectedRetryable: function () { var vm = this; return this.records.filter(function (row) {return vm.selected.indexOf(row.id) >= 0 && (row.state === 'failed' || row.state === 'retry');}).map(function (row) {return row.id;}); },
     },
@@ -139,7 +137,7 @@
       deleteSelected: function () {
         if (this.busy || !this.canDeleteSelected) return;
         var vm = this, ids = this.selected.slice();
-        this.$confirm('将永久删除选中的 ' + ids.length + ' 条失败推送记录及其发送详情。对应报警将保留。', '删除失败推送记录',
+        this.$confirm('将永久删除选中的 ' + ids.length + ' 条推送记录及其发送详情，取消这些记录后续的重试。对应报警将保留。', '删除推送记录',
           {confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning', distinguishCancelAndClose: true})
           .then(function () {
             vm.action('/delete', {ids: ids}, function () {
@@ -251,7 +249,7 @@
           h('td', {attrs: {title: row.target_url}}, row.target_url), h('td', [control(h, '查看详情', function (event) {vm.openDetail(row.id, event);}, false)])]);
       });
       sections.push(h('section', {class: 'ai-push-card'}, [h('div', {class: 'ai-push-heading'}, [h('h3', '发送记录'), h('div', {class: 'ai-push-actions'}, [control(h, '最近记录', function () {vm.tab = 'recent'; vm.selected = [];}, this.busy, this.tab === 'recent'), control(h, '失败与重试', function () {vm.tab = 'failures'; vm.selected = [];}, this.busy, this.tab === 'failures')])]),
-        h('div', {class: 'ai-push-actions'}, [control(h, '重试选中记录', function () {vm.retry(false);}, this.busy || !this.selectedRetryable.length || this.dirty || this.newConfig, true), control(h, '重试全部失败记录', function () {vm.retry(true);}, this.busy || !(counts.failed + counts.retry) || this.dirty || this.newConfig), status.can_delete === true && control(h, '删除选中失败记录', function () {vm.deleteSelected();}, this.busy || !this.canDeleteSelected), h('span', {class: 'ai-push-note'}, '重试使用当前已保存的接收地址和鉴权。')]),
+        h('div', {class: 'ai-push-actions'}, [control(h, '重试选中记录', function () {vm.retry(false);}, this.busy || !this.selectedRetryable.length || this.dirty || this.newConfig, true), control(h, '重试全部失败记录', function () {vm.retry(true);}, this.busy || !(counts.failed + counts.retry) || this.dirty || this.newConfig), status.can_delete === true && control(h, '删除选中记录', function () {vm.deleteSelected();}, this.busy || !this.canDeleteSelected), h('span', {class: 'ai-push-note'}, '重试使用当前已保存的接收地址和鉴权。')]),
         h('div', {class: 'ai-push-table-wrap'}, [h('table', {class: 'ai-push-table'}, [h('thead', [h('tr', ['选择', '编号', '状态', '报警 / 设备', '本轮尝试次数', '生成时间', '最近结果', '接收地址', '详情'].map(function (text) {return h('th', text);}))]), h('tbody', rows.length ? rows : [h('tr', [h('td', {attrs: {colspan: 9}, class: 'ai-push-empty'}, '暂无' + (this.tab === 'failures' ? '失败或待重试' : '发送') + '记录')])])])]),
         h('p', {class: 'ai-push-note'}, (this.tab === 'failures' ? '显示最近 100 条异常记录。' : '显示最近 50 条记录。') + status.history_note),
         h('p', {class: 'ai-push-note'}, '网络异常会自动退避重试，最多 ' + status.limits.max_attempts + ' 次。格式异常的数据已隔离，不会发送。' + status.delivery_note)

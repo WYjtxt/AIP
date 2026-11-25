@@ -38,7 +38,7 @@ def dispatch(method, path, body=None):
             return 200, {'code': 200, 'msg': '失败记录已按当前地址和鉴权重新排队', 'data': data}
         if method == 'POST' and path == '/push/delete':
             data = outbox.delete_failed(body)
-            return 200, {'code': 200, 'msg': '所选失败记录已处理', 'data': data}
+            return 200, {'code': 200, 'msg': '所选推送记录已处理', 'data': data}
         if method == 'POST' and path == '/push/test':
             if body not in ({}, None):
                 raise ValueError('测试推送只使用已保存的配置')

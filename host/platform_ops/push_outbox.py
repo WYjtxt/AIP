@@ -501,7 +501,7 @@ def retry_failed(body):
 
 def delete_failed(body):
     if not isinstance(body, dict) or set(body) != {'ids'}:
-        raise ValueError('请选择要删除的失败记录')
+        raise ValueError('请选择要删除的推送记录')
     ids = body['ids']
     if not isinstance(ids, list) or not 1 <= len(ids) <= 200 or any(
             type(i) is not int or not 1 <= i <= 9223372036854775807 for i in ids):
@@ -512,12 +512,12 @@ def delete_failed(body):
     try:
         conn.execute('BEGIN IMMEDIATE')
         existing = conn.execute('SELECT state FROM deliveries WHERE id IN (' + placeholders + ')', ids).fetchall()
-        if any(row['state'] != 'failed' for row in existing):
-            raise Conflict('所选记录中包含未停止重试或其他状态的记录，请刷新后重新选择')
+        if any(row['state'] not in ('retry', 'failed') for row in existing):
+            raise Conflict('只能删除等待重试或需处理的记录，请刷新后重新选择')
         # delivery_keys stays intact so Kafka replays cannot recreate a deleted delivery.
         if existing:
             conn.execute('DELETE FROM delivery_attempts WHERE delivery_id IN (' + placeholders + ')', ids)
-            deleted = conn.execute("DELETE FROM deliveries WHERE state='failed' AND id IN (" + placeholders + ')', ids).rowcount
+            deleted = conn.execute("DELETE FROM deliveries WHERE state IN ('retry','failed') AND id IN (" + placeholders + ')', ids).rowcount
         else:
             deleted = 0
         conn.commit()
