@@ -28,3 +28,45 @@
 | `AIP_COMPUTING_PASSWORD` | 计算设备配置 |
 | `AIP_ONVIF_PASSWORD` | 独立运行 ONVIF 示例 |
 | `AIP_CAMERA_PASSWORD` | 设备未单独指定密码时使用的可选默认值 |
+
+## 原生部署
+
+原生部署由 Linux 的 systemd 管理前后端、媒体、数据库、消息服务和算法进程。以下安装步骤适用于 **`V3.0.5-native` 完整交付包**。本仓库收录的现场版本采用 Docker Compose，当前 `3.0.8-261124-field5` 安装器仅提供容器模式。需要从零搭建原生环境时，请先取得带原生清单的对应版本介质。本仓库可直接用于下文的已安装站点自检。
+
+### 1. 准备安装介质和目标机
+
+- 在 Windows 上将同一版本的 `PlatformOneClickDeployer.exe`、`payload/` 和 `packages/` 放在同一目录。核对 `payload/native-release.json` 的 `release` 为 `V3.0.5-native`，且列出了目标架构的文件和 SHA-256。
+- 介质应包含 `payload/platform_code.tar.gz`、`packages/<架构>/runtime_bundle.tar.gz`、该架构的系统及 Python 依赖，以及 `packages/native/<架构>/` 下的 `backend-runtime.tar.gz`、`frontend-runtime.tar.gz`、`media-runtime.tar.gz` 和 `gateway-runtime.tar.gz`。
+- 已核对的硬件配置为 **Ubuntu 20.04 / x86_64 / 算能 BM1684X（SC7）** 和 **openEuler 22.03 SP4 / aarch64 / 昇腾 310P3**。准备可通过 SSH 登录的 root 或具备 sudo 权限的账号。新装使用空程序目录，默认 `/data/AIGO/platform_start`。已有容器部署标记的目录会被原生安装器拒绝。
+
+### 2. 首次安装
+
+1. 在 Windows 介质根目录打开 `PlatformOneClickDeployer.exe`，填写服务器 IP、SSH 端口及账号，点击“测试连接”。
+2. 选择 **native（原生部署）**、**fresh（首次安装）**，确认“部署介质根目录”和“服务器平台程序目录”。离线安装选择 `offline`。按界面为数据库和 8899 调度管理员设置本站口令。
+3. 点击“开始部署”。工具将介质传到目标机 `/root/oneclick`，校验架构和安装包，安装运行环境和 MySQL、Redis、Kafka，部署应用、网关及对应硬件的算法服务，并注册 systemd 单元。
+4. 等待日志输出 **`DEPLOY_RESULT=PASS`**。服务清单写入程序目录下的 `native-deployment.json`。在受信任的管理终端打开 `https://<服务器IP>:8888/` 登录主平台，按现场流程完成机器授权；调度入口为 `https://<服务器IP>:8899/login`。首次主平台账号信息由安装器写入受限的 `initial-access.json`。
+
+### 3. 验收服务和业务
+
+在 Windows 原生交付包目录中可单独运行验证。将示例 IP 和 SSH 用户替换为本站值；工具会提示输入 SSH 密码。
+
+```powershell
+.\PlatformOneClickDeployer.exe --runtime native --ip 192.0.2.10 --ssh-user deploy --mode verify --data-root /data/AIGO/platform_start
+```
+
+也可在**已经完成原生安装**的 Linux 主机上，从本仓库根目录运行只读自检。此处须显式指定 `MODE=verify`，脚本省略模式时默认进入修复流程。
+
+```bash
+sudo env MODE=verify PLATFORM_DATA_ROOT=/data/AIGO/platform_start python3 container-tools/web/deploy_native.py
+```
+
+自检逐项检查登记的 systemd 服务，并要求主站首页、`/api/activate/activate_verify` 和调度登录页均返回 HTTP 200，成功时输出 **`VERIFY_RESULT=PASS`**。业务验收时，再选一路可用摄像机确认实时预览、任务持续出帧，并用已知样例核对一次报警及录像。这一步验证实际的硬件推理和视频链路。[服务与自检实现](container-tools/web/deploy_native.py)
+
+### 4. 中断与修复
+
+首次安装中断且配置目录已经生成时，保持原程序目录，查阅目标机 `/root/oneclick/logs/` 中对应的部署日志，解决报错后选 `repair` 续装。已有原生环境仅更新代码时使用 `platform`，完成后再次执行 `verify`。后端启动失败可从以下两条命令定位，其他服务可使用 `native-deployment.json` 中登记的单元名。
+
+```bash
+systemctl status ai-platform-backend --no-pager
+sudo journalctl -u ai-platform-backend -n 100 --no-pager
+```
