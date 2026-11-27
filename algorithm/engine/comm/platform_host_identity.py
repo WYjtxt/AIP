@@ -10,6 +10,7 @@ import re
 import secrets
 
 TABLE = 't_platform_computing_identity'
+RESOURCE_SAMPLE_TABLE = 't_platform_resource_sample'
 APP_KEY = b'ai-platform.computing.v1'
 ANCHOR_KEY = b'ai-platform.computing.anchor.v1'
 
@@ -60,12 +61,17 @@ def ensure_schema(connection):
             'host_uid VARCHAR(64) NOT NULL UNIQUE, anchor_uid VARCHAR(64), '
             'created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, '
             'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)')
+        cursor.execute('CREATE TABLE IF NOT EXISTS ' + RESOURCE_SAMPLE_TABLE + ' ('
+            'host_uid VARCHAR(64) NOT NULL, dev_id INTEGER NOT NULL, '
+            'resource_id INTEGER NOT NULL, sampled_at DATETIME(6) NOT NULL, '
+            'PRIMARY KEY (host_uid, dev_id), INDEX (resource_id)) ENGINE=InnoDB')
     connection.commit()
 
 
 def _missing_table(error):
-    return (getattr(error, 'args', [None])[0] == 1146 or
-            'no such table: ' + TABLE in str(error))
+    args = getattr(error, 'args', ())
+    return ((args and args[0] == 1146) or
+            any('no such table: ' + table in str(error) for table in (TABLE, RESOURCE_SAMPLE_TABLE)))
 
 
 def _verify_anchor(saved, current):
@@ -133,54 +139,108 @@ def resolve_device(cursor, identity, legacy_ip=None, lock=False):
     if not legacy_ip:
         return None
     cursor.execute('SELECT id,computing_ip,server_type FROM t_computing_equipment '
-                   'WHERE computing_ip=%s AND server_type=1 ORDER BY id', (str(legacy_ip).strip(),))
+                   'WHERE computing_ip=%s AND server_type=1 ORDER BY id' + (' FOR UPDATE' if lock else ''),
+                   (str(legacy_ip).strip(),))
     devices = cursor.fetchall()
     if len(devices) > 1:
         raise IdentityConflict('旧 IP 对应多台服务器，未自动选择或合并')
     if not devices:
         return None
     device = devices[0]
-    if schema and identity_rows(cursor, computing_id=device[0]):
+    if schema and identity_rows(cursor, computing_id=device[0], lock=lock):
         raise IdentityConflict('该 IP 已属于其他机器码，未接管原服务器')
     return {'computing_id':int(device[0]),'computing_ip':device[1],'source':'legacy_ip'}
 
 
-def publish_resources(connection, rows, identity, legacy_ip=None):
-    """Use stable server + logical card ID, retaining existing resource PKs."""
+def card_serial(value):
+    if isinstance(value, bytes):
+        value = value.decode('ascii', errors='replace')
+    value = str(value or '').strip()
+    return value if value and not re.fullmatch(r'0+|-1?|-|n/a|none|null|unknown', value, re.I) else None
+
+
+def _sample_clock(cursor):
+    cursor.execute('SELECT CURRENT_TIMESTAMP(6)')
+    return cursor.fetchone()[0]
+
+
+def resource_sample_clock(connection):
+    """Timestamp the start of collection in the database clock domain."""
+    with connection.cursor() as cursor:
+        return _sample_clock(cursor)
+
+
+def _select_resource_row(rows, serial, preferred_id):
+    known = {card_serial(existing) for _, existing in rows} - {None}
+    if serial:
+        compatible = [row for row in rows if card_serial(row[1]) == serial]
+        if not compatible:
+            if known:
+                raise IdentityConflict('算力卡序列号变化，未覆盖原卡或任务关联')
+            compatible = rows
+    else:
+        previous = next((row for row in rows if row[0] == preferred_id), None)
+        if len(known) > 1 and previous is None:
+            raise IdentityConflict('算力卡身份不唯一，未覆盖原卡或任务关联')
+        compatible = [row for row in rows if card_serial(row[1])] or rows
+    return next((row for row in compatible if row[0] == preferred_id), compatible[0] if compatible else None)
+
+
+def publish_resources(connection, rows, identity, legacy_ip=None, sampled_at=None):
+    """Update this machine's cards without reassigning task-bound card IDs."""
     try:
         with connection.cursor() as cursor:
             device = resolve_device(cursor,identity,legacy_ip,lock=True)
             if device is None:
                 raise IdentityConflict('本机未登记，未写入或新建算力卡')
             cid, address = device['computing_id'], device['computing_ip']
+            uid = identity['host_uid']
+            if device['source'] == 'legacy_ip':
+                bind_identity(cursor, cid, identity)
+            sampled_at = _sample_clock(cursor) if sampled_at is None else sampled_at
             updated = []
+            skipped = []
+            seen = set()
             for values in rows:
                 if len(values) != 9:
                     raise ValueError('Invalid vendor resource sample')
                 dev_id = int(values[1])
-                if dev_id < 0:
-                    raise ValueError('Invalid logical card ID')
+                if dev_id < 0 or dev_id in seen:
+                    raise ValueError('Invalid or duplicate logical card ID')
+                seen.add(dev_id)
+                cursor.execute('SELECT resource_id,sampled_at FROM ' + RESOURCE_SAMPLE_TABLE
+                               + ' WHERE host_uid=%s AND dev_id=%s FOR UPDATE', (uid, dev_id))
+                last_sample = cursor.fetchone()
+                if last_sample and last_sample[1] >= sampled_at:
+                    continue
                 cursor.execute('SELECT id,dev_get_sn FROM t_resource_usage WHERE computing_id=%s AND dev_id=%s ORDER BY id FOR UPDATE', (cid,dev_id))
                 matching = cursor.fetchall()
-                if len(matching) > 1:
-                    raise IdentityConflict('同一服务器存在重复算力卡记录，请核实后处理')
-                if matching:
-                    rid, saved_sn = matching[0]
-                    if saved_sn and values[3] and str(saved_sn) != str(values[3]):
-                        raise IdentityConflict('算力卡序列号变化，未覆盖原卡或任务关联')
+                serial = card_serial(values[3])
+                try:
+                    selected = _select_resource_row(matching, serial, last_sample[0] if last_sample else None)
+                except IdentityConflict:
+                    skipped.append(dev_id)
+                    continue
+                if selected:
+                    rid, saved_serial = selected
+                    metrics = (values[2], serial or saved_serial) + tuple(values[4:])
                     cursor.execute('UPDATE t_resource_usage SET dev_ip=%s,dev_get_target=%s,dev_get_sn=%s,'
                         'board_temp=%s,chip_temp=%s,mem_used_mem_total=%s,memory_usage_rate=%s,tpu_util=%s,'
-                        'updated_at=CURRENT_TIMESTAMP WHERE id=%s AND computing_id=%s',
-                        (address,) + tuple(values[2:]) + (rid,cid))
+                        'updated_at=%s WHERE id=%s AND computing_id=%s',
+                        (address,) + metrics + (sampled_at,rid,cid))
                 else:
                     cursor.execute('INSERT INTO t_resource_usage (dev_ip,dev_id,dev_get_target,dev_get_sn,'
                         'board_temp,chip_temp,mem_used_mem_total,memory_usage_rate,tpu_util,computing_id,resource_num,created_at,updated_at) '
-                        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)',
-                        (address,dev_id) + tuple(values[2:]) + (cid,))
+                        'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,CURRENT_TIMESTAMP,%s)',
+                        (address,dev_id,values[2],serial) + tuple(values[4:]) + (cid,sampled_at))
                     rid = cursor.lastrowid
+                cursor.execute('INSERT INTO ' + RESOURCE_SAMPLE_TABLE + ' (host_uid,dev_id,resource_id,sampled_at) '
+                               'VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE resource_id=VALUES(resource_id),'
+                               'sampled_at=VALUES(sampled_at)', (uid, dev_id, rid, sampled_at))
                 updated.append(int(rid))
         connection.commit()
-        return {'computing_id':cid,'resource_ids':updated,'identity_source':device['source']}
+        return {'computing_id':cid,'resource_ids':updated,'skipped_device_ids':skipped,
+                'identity_source':'machine_id'}
     except Exception:
         connection.rollback()
         raise
@@ -201,7 +261,8 @@ def update_address(cursor, computing_id, address, identity):
         raise IdentityConflict('新地址已登记为其他设备，未合并或覆盖')
     cursor.execute('UPDATE t_computing_equipment SET computing_ip=%s,updated_at=CURRENT_TIMESTAMP '
                    'WHERE id=%s AND computing_ip<>%s',(address,cid,address))
-    cursor.execute('UPDATE t_resource_usage SET dev_ip=%s WHERE computing_id=%s AND (dev_ip IS NULL OR dev_ip<>%s)',(address,cid,address))
+    cursor.execute('UPDATE t_resource_usage SET dev_ip=%s,updated_at=updated_at '
+                   'WHERE computing_id=%s AND (dev_ip IS NULL OR dev_ip<>%s)',(address,cid,address))
 
 
 def register_device(connection, address, name, username, password, identity=None, allow_existing=False):
@@ -267,4 +328,11 @@ def rebind_after_reinstall(cursor, computing_id, expected_old_uid, identity):
         raise IdentityConflict('缺少独立硬件指纹，需人工核实原服务器')
     _verify_anchor(own[0]['anchor_uid'],identity.get('anchor_uid'))
     cursor.execute('UPDATE '+TABLE+' SET host_uid=%s,updated_at=CURRENT_TIMESTAMP WHERE computing_id=%s AND host_uid=%s',(new,cid,old))
-    return cursor.rowcount==1
+    updated = cursor.rowcount == 1
+    if updated and old != new:
+        try:
+            cursor.execute('UPDATE ' + RESOURCE_SAMPLE_TABLE + ' SET host_uid=%s WHERE host_uid=%s', (new, old))
+        except Exception as error:
+            if not _missing_table(error):
+                raise
+    return updated

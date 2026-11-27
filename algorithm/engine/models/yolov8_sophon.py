@@ -121,7 +121,7 @@ def xywh2xyxy(x):
     return y
 
 
-def nms_boxes(boxes, scores, nms_thresh):
+def nms_boxes(boxes, scores, nms_thresh, max_keep=None):
     '''非极大值抑制，boxes 为 xyxy，返回保留框索引。'''
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -133,6 +133,9 @@ def nms_boxes(boxes, scores, nms_thresh):
     while order.size > 0:
         i = order[0]
         keep.append(i)
+        # Later iterations can only add lower-ranked boxes to this prefix.
+        if max_keep is not None and len(keep) >= max_keep:
+            break
         xx1 = np.maximum(x1[i], x1[order[1:]])
         yy1 = np.maximum(y1[i], y1[order[1:]])
         xx2 = np.minimum(x2[i], x2[order[1:]])
@@ -165,7 +168,8 @@ def postprocess(pred, img_w, img_h, ratio, txy, conf_thresh, nms_thresh, max_det
     classes = cls_scores[keep].argmax(axis=1)
     boxes = xywh2xyxy(pred[keep, :4])
     offset = classes.astype(np.float32) * _NMS_CLASS_OFFSET
-    keep_idx = nms_boxes(boxes + offset[:, None], scores, nms_thresh)
+    keep_idx = nms_boxes(boxes + offset[:, None], scores, nms_thresh,
+                         max_keep=max_det if max_det > 0 else None)
     if keep_idx.size == 0:
         return None, None, None
     if keep_idx.size > max_det:
@@ -228,9 +232,9 @@ def postprocess_pose(pred, img_w, img_h, ratio, txy, conf_thresh, nms_thresh,
     scores = scores[keep]
     classes = cls_scores[keep].argmax(axis=1)
     boxes = xywh2xyxy(pred[keep, :4])
-    keypoints = pred[keep, 4 + nc:].reshape(-1, int(kpt_num), 3).copy()
     offset = classes.astype(np.float32) * _NMS_CLASS_OFFSET
-    keep_idx = nms_boxes(boxes + offset[:, None], scores, nms_thresh)
+    keep_idx = nms_boxes(boxes + offset[:, None], scores, nms_thresh,
+                         max_keep=max_det if max_det > 0 else None)
     if keep_idx.size == 0:
         return None, None, None, None
     if keep_idx.size > max_det:
@@ -238,7 +242,7 @@ def postprocess_pose(pred, img_w, img_h, ratio, txy, conf_thresh, nms_thresh,
     boxes = boxes[keep_idx]
     classes = classes[keep_idx]
     scores = scores[keep_idx]
-    keypoints = keypoints[keep_idx]
+    keypoints = pred[np.flatnonzero(keep)[keep_idx], 4 + nc:].reshape(-1, int(kpt_num), 3)
     # letterbox 逆映射：框与关键点用同一组 ratio/txy
     boxes[:, [0, 2]] = (boxes[:, [0, 2]] - txy[0]) / ratio[0]
     boxes[:, [1, 3]] = (boxes[:, [1, 3]] - txy[1]) / ratio[1]

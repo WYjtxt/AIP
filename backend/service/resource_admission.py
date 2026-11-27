@@ -165,10 +165,12 @@ def _observe_start_load(redis, host, pending, state, cpu_started_at, now, rules)
     release = False
     if ready and now - reservation['completed_at'] >= rules['reservation_seconds']:
         cards = view(state, now, rules)['cards']
+        aliases = state.get('card_aliases', {})
+        start_cards = {aliases.get(card, card) for card in reservation['start_cards']}
         release = (state.get('cpu_at') is not None and cpu_started_at > ready['at'] and all(
             not cards.get(card, {}).get('disabled', True) and
             cards[card]['sampled_at'] > ready['at'] and state['cards'][card].get('token')
-            for card in reservation['start_cards']))
+            for card in start_cards))
     if not release and reservation.get('ready') == ready:
         return
     # The collector never waits behind a start or holds task locks here. Check
@@ -192,38 +194,42 @@ def _observe_start_load(redis, host, pending, state, cpu_started_at, now, rules)
 
 def collect():
     from data.exts import db
+    from data.resource_view_data import ResourceViewData
     from model.equipment import Computing_equipment
-    from service.resource_view_service import _sample_host_metrics, _publish_host_metrics
-    from sqlalchemy import text
+    from service.computing_identity_service import binding_map
+    from service.resource_view_service import _current_resource_slots, _sample_host_metrics, _publish_host_metrics
     redis = client()
     # All Gunicorn workers may register APScheduler; only one samples at a time.
     with redis.lock(PREFIX + 'collector', timeout=90, blocking_timeout=0.1):
         hosts = db.session.query(Computing_equipment).filter(Computing_equipment.server_type == 1).all()
+        bindings = binding_map() if hosts else {}
         rules = policy()
         for host in hosts:
             host_id = str(host.id)
+            binding = bindings.get(host.id)
             pending = _pending(redis, host_id, rules)
             cpu_started_at = time.time()
-            metrics = _sample_host_metrics(host)
-            _publish_host_metrics(host, metrics)
+            metrics = _sample_host_metrics(host, binding)
+            _publish_host_metrics(host, metrics, binding)
+            rows = ResourceViewData.get_resource_usage_by_computing_id(host.id)
             now = time.time()
             cpu = percentage(metrics.get('cpu_usage'))
-            rows = db.session.execute(text('SELECT id, dev_id, tpu_util, memory_usage_rate, board_temp, chip_temp, dev_get_target, updated_at, '
-                'TIMESTAMPDIFF(MICROSECOND, updated_at, NOW(6))/1000000.0 AS age '
-                'FROM t_resource_usage WHERE computing_id=:host'), {'host': host.id}).fetchall()
             cards = []
-            for row in rows:
-                age = float(row.age) if row.age is not None else None
-                cards.append({'id': row.id, 'dev_id': row.dev_id, 'util': row.tpu_util,
-                              'memory': row.memory_usage_rate, 'target': row.dev_get_target,
-                              'board_temperature': row.board_temp, 'chip_temperature': row.chip_temp,
-                              'token': str(row.updated_at) if row.updated_at else None,
-                              'sampled_at': now - age if age is not None else None})
+            aliases = {}
+            for row, _, related_ids in _current_resource_slots(rows):
+                age = float(row['sample_age']) if row['sample_age'] is not None else None
+                cards.append({'id': row['id'], 'dev_id': row['dev_id'], 'util': row['tpu_util'],
+                              'memory': row['memory_usage_rate'], 'target': row['dev_get_target'],
+                              'board_temperature': row['board_temp'], 'chip_temperature': row['chip_temp'],
+                              'token': str(row['sample_token']) if row['sample_token'] else None,
+                              'sampled_at': now - age if age is not None and age >= 0 else None})
+                aliases.update({str(rid): str(row['id']) for rid in related_ids if rid != row['id']})
             key = PREFIX + 'host:' + host_id
             sample = {'cpu': cpu, 'cpu_at': now if cpu is not None else None,
                       'cpu_token': metrics.get('host_metrics_sampled_at') if cpu is not None else None, 'cards': cards}
             state = advance(_read(redis, key), sample, now, rules)
             state['computing_id'] = host.id
+            state['card_aliases'] = aliases
             redis.setex(key, 86400, json.dumps(state))
             try:
                 _observe_start_load(redis, host_id, pending, state, cpu_started_at, now, rules)
@@ -238,21 +244,25 @@ def snapshot(ignore_pending_hosts=()):
     now = time.time()
     redis = client()
     resources = db.session.query(Resource_usage.id, Resource_usage.computing_id).all()
-    hosts, cards = {}, {}
+    hosts, cards, aliases = {}, {}, {}
     for resource in resources:
         host_id = str(resource.computing_id)
         if host_id not in hosts:
             state = _read(redis, PREFIX + 'host:' + host_id)
             pending = _pending(redis, host_id, rules)
             hosts[host_id] = view(state, now, rules, bool(pending) and host_id not in ignore_pending_hosts)
+            aliases[host_id] = (state or {}).get('card_aliases', {})
             if pending:
                 hosts[host_id]['observation'] = {key: pending[key] for key in
                     ('phase', 'configured_seconds', 'effective_seconds', 'remaining_seconds')}
             hosts[host_id]['reserved_cpu'] = ((pending['reserved_cpu'] if pending else 0) +
                 sum(float(item['cost']) for item in _resume_entries(redis, host_id, now)))
-        status = hosts[host_id]['cards'].get(str(resource.id), {'disabled': True,
+        card_id = str(resource.id)
+        canonical = aliases[host_id].get(card_id, card_id)
+        status = hosts[host_id]['cards'].get(canonical, {'disabled': True,
             'state': 'unknown', 'reason': '正在采集资源状态，请稍后重试', 'utilization': None, 'sampled_at': None})
         cards[str(resource.id)] = dict(status, computing_id=resource.computing_id,
+            canonical_resource_id=int(canonical),
             cpu=hosts[host_id]['cpu'], cpu_warning=hosts[host_id]['cpu_warning'], cpu_warning_threshold=rules['cpu_warning'])
         observation = hosts[host_id].get('observation')
         if observation:

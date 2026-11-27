@@ -38,6 +38,7 @@ from config.zlk_conf import ZLK_HOST, ZLK_PORT, ZLK_SECRET
 from data.exts import db
 from model.equipment import Equipment
 from model.extra import Zlk_data
+from service.media_stream_index import index_media_streams, media_stream_rows
 from service.preview_urls import media_base_url, playback_urls
 
 logger = logging.getLogger(__name__)
@@ -69,13 +70,9 @@ def _media_snapshot(app=None, stream=None):
         return None
 
 
-def _serialize(row, base, snapshot, online_by_area=None):
+def _serialize(row, base, matching, online_by_area=None):
     name = row.equipment_name or '监控点 {}'.format(row.id)
     app = row.zlk_app or 'openUrl'
-    matching = None if snapshot is None else [
-        item for item in snapshot
-        if item.get('app') == app and item.get('stream') == row.zlk_live
-    ]
     # MP4 can register with audio before the source's first video keyframe.
     # An online audio-only muxer is not a browser-ready camera picture.
     mp4_rows = [item for item in matching or [] if item.get('schema') == 'fmp4']
@@ -173,12 +170,13 @@ def _query():
 def list_preview_devices():
     try:
         rows = _query().order_by(Equipment.parent_id, Equipment.equipment_aisles, Equipment.id).all()
-        snapshot = _media_snapshot()
+        media = index_media_streams(_media_snapshot())
         online_by_area = _hik_online_by_area(rows)
         base = _base_url()
         return {'code': 200, 'msg': '获取成功',
-                'data': [_serialize(row, base, snapshot, online_by_area) for row in rows],
-                'media_status_known': snapshot is not None}
+                'data': [_serialize(row, base, media_stream_rows(media, row.zlk_app or 'openUrl', row.zlk_live),
+                                    online_by_area) for row in rows],
+                'media_status_known': media is not None}
     except ValueError as exc:
         return {'code': 400, 'msg': str(exc)}
     except Exception:
@@ -200,7 +198,8 @@ def get_preview_stream(equipment_id):
         if not row:
             return {'code': 404, 'msg': '该设备不存在、已禁用或未关联流媒体转发'}
         snapshot = _media_snapshot(row.zlk_app, row.zlk_live) if row.zlk_live else []
-        data = _serialize(row, _base_url(), snapshot, _hik_online_by_area([row]))
+        matching = media_stream_rows(index_media_streams(snapshot), row.zlk_app or 'openUrl', row.zlk_live)
+        data = _serialize(row, _base_url(), matching, _hik_online_by_area([row]))
         if data['needs_prepare']:
             message = ('请先建立该安防平台监控点的转发' if data['source_mode'] == 'hik-platform'
                        else '请先建立该录像机通道的转发')

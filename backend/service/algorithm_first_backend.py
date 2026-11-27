@@ -261,11 +261,13 @@ class Workflow:
                           'reason': ('硬件型号与算法不兼容或服务器不存在' if not valid else
                           status.get('reason', '资源状态未知，启动时重新检查') if admission_disabled else ''),
                           'utilization': status.get('utilization'), 'selection_score': status.get('selection_score'),
+                          'legacy_alias': status.get('canonical_resource_id', row.id) != row.id,
                           'recommended': False})
         def score(row):
             value = row.get('selection_score')
             return value if isinstance(value, (int, float)) else row['utilization'] if isinstance(row['utilization'], (int, float)) else 101
-        cards.sort(key=lambda row: (row['disabled'], row['admission_disabled'], str(row['dev_id']) != '0', score(row), row['id']))
+        cards.sort(key=lambda row: (row['disabled'], row['admission_disabled'], row['legacy_alias'],
+                                    str(row['dev_id']) != '0', score(row), row['id']))
         first = next((row for row in cards if not row['disabled']), None)
         if first:
             first['recommended'] = True

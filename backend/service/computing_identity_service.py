@@ -19,8 +19,16 @@ def _guard_local_site_address(mapped, target):
         raise IdentityConflict('本机 IP 已由 Config_files/platform-site.json 统一管理，请通过统一配置预览并应用')
 
 
+SAVED_SECRET_MASK = '*' * 6
+
+
 class IdentityProbeUnavailable(ValueError):
     pass
+
+
+def identity_probe_source():
+    module = (Path(__file__).parents[1] / 'common/platform_host_identity.py').read_text(encoding='utf-8')
+    return module + '\nimport json;print(json.dumps(read_host_identity()), flush=True)\n'
 
 
 def probe_identity(address, username, password):
@@ -32,10 +40,8 @@ def probe_identity(address, username, password):
     try:
         ssh.connect(str(address),username=username,password=password,timeout=5,banner_timeout=5,
                     auth_timeout=5,look_for_keys=False,allow_agent=False)
-        source=(Path(__file__).parents[1]/'common/platform_host_identity.py').read_text(encoding='utf-8')
-        source+='\nimport json;print(json.dumps(read_host_identity()))\n'
         stdin,stdout,stderr=ssh.exec_command('python3 -',timeout=6)
-        stdin.write('exec('+ascii(source)+')');stdin.channel.shutdown_write()
+        stdin.write('exec('+ascii(identity_probe_source())+')');stdin.channel.shutdown_write()
         raw=stdout.read(4096);error=stderr.read();code=stdout.channel.recv_exit_status()
         if code:raise IdentityProbeUnavailable('无法读取远程设备身份')
         value=json.loads(raw.decode('utf-8'));_uid(value['host_uid'])
@@ -56,7 +62,7 @@ def _connection():
     return db.engine.raw_connection()
 
 
-def uid_map():
+def binding_map():
     connection=_connection()
     try:
         with connection.cursor() as cursor:
@@ -64,8 +70,12 @@ def uid_map():
             except Exception as error:
                 if _missing_table(error):return {}
                 raise
-        return {row['computing_id']:row['host_uid'] for row in rows}
+        return {row['computing_id']:row for row in rows}
     finally:connection.close()
+
+
+def uid_map():
+    return {key: row['host_uid'] for key, row in binding_map().items()}
 
 
 def add(address, name, username, password):
@@ -97,6 +107,8 @@ def update(computing_id, address=None, name=None, username=None, password=None):
             old=cursor.fetchone()
             if not old:return False,'算力设备不存在'
             mapped=identity_rows(cursor,computing_id=int(computing_id))
+        if password in ('', SAVED_SECRET_MASK):
+            password=None
         target=old[0] if address is None else str(address).strip()
         user=old[2] if username is None else username
         secret=old[3] if password is None else password

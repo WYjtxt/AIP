@@ -1,66 +1,74 @@
-"""Publish real BM1684X card measurements using the installed SAIL SDK."""
+"""Publish Sophon card measurements using the installed SAIL SDK."""
 import configparser
 import logging
+import os
 from pathlib import Path
+import sys
 import time
 
 import pymysql
 import sophon.sail as sail
 
-COMPUTING_ID = 1
-
 
 def sample_cards(api, ip):
     rows = []
     for device_id in range(api.get_available_tpu_num()):
-        handle = api.Handle(device_id)
-        total, used, util = api.get_dev_stat(device_id)
-        rows.append((ip, device_id, str(handle.get_target()), str(handle.get_sn()),
-                     str(api.get_board_temp(device_id)), str(api.get_chip_temp(device_id)),
-                     '%sMB/%sMB' % (used, total), '%.2f%%' % (used * 100 / total if total else 0),
-                     '%.2f%%' % util))
+        try:
+            handle = api.Handle(device_id)
+            total, used, util = api.get_dev_stat(device_id)
+            if not 0 <= used <= total or not 0 <= util <= 100 or total <= 0:
+                raise ValueError('invalid Sophon sample')
+            rows.append((ip, device_id, str(handle.get_target()), handle.get_sn(),
+                         str(api.get_board_temp(device_id)), str(api.get_chip_temp(device_id)),
+                         '%sMB/%sMB' % (used, total), '%.2f%%' % (used * 100 / total),
+                         '%.2f%%' % util))
+        except Exception as error:
+            logging.warning('Sophon card %d measurement unavailable: %s', device_id, type(error).__name__)
     return rows
 
 
-def publish(connection, rows, computing_id):
-    with connection.cursor() as cursor:
-        for row in rows:
-            cursor.execute('SELECT id FROM t_resource_usage WHERE dev_ip=%s AND dev_id=%s LIMIT 1', row[:2])
-            existing = cursor.fetchone()
-            if existing:
-                cursor.execute('UPDATE t_resource_usage SET dev_get_target=%s,dev_get_sn=%s,board_temp=%s,'
-                    'chip_temp=%s,mem_used_mem_total=%s,memory_usage_rate=%s,tpu_util=%s,computing_id=%s,updated_at=NOW() WHERE id=%s',
-                    row[2:] + (int(computing_id), existing[0]))
-            else:
-                cursor.execute('INSERT INTO t_resource_usage (dev_ip,dev_id,dev_get_target,dev_get_sn,'
-                    'board_temp,chip_temp,mem_used_mem_total,memory_usage_rate,tpu_util,computing_id,resource_num) '
-                    'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0)', row + (int(computing_id),))
-    connection.commit()
-
-
 def main():
-    root = Path(__file__).resolve().parents[1]
+    root = Path(os.environ.get('PLATFORM_NATIVE_ROOT', Path(__file__).absolute().parents[1]))
+    sys.path.insert(0, str(root / 'platform_algorithm_start'))
+    from comm.platform_host_identity import ensure_schema, publish_resources, read_host_identity, resource_sample_clock
+    identity = read_host_identity()
     config = configparser.ConfigParser(interpolation=None)
     config.read(str(root / 'Config_files/config.ini'), encoding='utf-8')
     database = config['database']
     algorithm = configparser.ConfigParser(interpolation=None)
     algorithm.read(str(root / 'platform_algorithm_start/config/ApiConfig.ini'), encoding='utf-8')
-    ip = algorithm['ipconfig']['localhost_ip']
+    ip = algorithm.get('ipconfig', 'localhost_ip', fallback=None)
     logging.basicConfig(level=logging.INFO)
+    connection = None
+    previous_conflicts = ()
     while True:
-        connection = None
         try:
-            connection = pymysql.connect(host=database['DB_HOST'], port=int(database.get('DB_PORT',3306)),
-                user=database['DB_USER'], password=database['DB_PASSWORD'], database=database['DB_NAME'],
-                charset='utf8mb4', connect_timeout=10)
-            publish(connection, sample_cards(sail, ip), COMPUTING_ID)
+            if connection is None:
+                connection = pymysql.connect(host=database['DB_HOST'], port=database.getint('DB_PORT', fallback=3306),
+                    user=database['DB_USER'], password=database['DB_PASSWORD'], database=database['DB_NAME'],
+                    charset='utf8mb4', connect_timeout=10, read_timeout=10, write_timeout=10)
+                ensure_schema(connection)
+            else:
+                connection.ping(reconnect=True)
+            sampled_at = resource_sample_clock(connection)
+            measurements = sample_cards(sail, ip)
+            result = publish_resources(connection, measurements, identity, ip, sampled_at)
+            conflicts = tuple(result['skipped_device_ids'])
+            if conflicts and conflicts != previous_conflicts:
+                logging.warning('Sophon IDs with conflicting card identities: %s', conflicts)
+            previous_conflicts = conflicts
         except Exception as error:
             if connection is not None:
-                connection.rollback()
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+                connection = None
             logging.error('Sophon resource collection failed: %s', type(error).__name__)
-        finally:
-            if connection is not None:
-                connection.close()
         time.sleep(2)
 
 

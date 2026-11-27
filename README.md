@@ -29,6 +29,14 @@
 | `AIP_ONVIF_PASSWORD` | 独立运行 ONVIF 示例 |
 | `AIP_CAMERA_PASSWORD` | 设备未单独指定密码时使用的可选默认值 |
 
+## 录像资源优化与算力监控
+
+算能算法按压缩字节限制报警录像缓存，大录像片段可临时落盘并逐帧编码。推理运行时沿用容器的 OpenCV 线程设置，只有持续空读时才增加轮询等待。x86_64 Linux 上可以从源码构建可选的原生加速库。[构建说明](algorithm/engine/runtime_acceleration/README.md)
+
+算能采集器按宿主机的稳定标识归属板卡，云管中心用数据库时间判定卡数据的新鲜度。已有的海康安防平台长效地址及 8604 接入仍从原网关模块供预览和算法使用。
+
+已有 Compose 基础环境可以用 `python3 algorithm/vendor_algorithms.py probe` 检查驱动，按厂商选择独立算法包。`verify` 核对包内容，`apply-auto` 从离线目录选择适配包并验收算法服务。本仓库沿用 `algorithm/engine` 和 `algorithm/packages` 作为公开算能源码目录，华为厂商包由相应交付介质提供。
+
 ## 原生部署
 
 原生部署由 Linux 的 systemd 管理前后端、媒体、数据库、消息服务和算法进程。以下安装步骤适用于 **`V3.0.5-native` 完整交付包**。本仓库收录的现场版本采用 Docker Compose，当前 `3.0.8-261124-field5` 安装器仅提供容器模式。需要从零搭建原生环境时，请先取得带原生清单的对应版本介质。本仓库可直接用于下文的已安装站点自检。

@@ -16,6 +16,7 @@ from sqlalchemy.orm import aliased
 from data.exts import db
 from model.algorithm import Algorithm_config, Algorithm_library
 from model.equipment import Equipment
+from service.media_stream_index import index_media_streams, media_stream_rows
 from service.preview_service import _base_url, _media_snapshot
 from service.preview_urls import playback_urls
 
@@ -57,16 +58,6 @@ def _task_summaries(rows):
     return grouped
 
 
-def _matching_media(snapshot, equipment_id):
-    if snapshot is None:
-        return None
-    # Canonical decimal IDs avoid matching another application's source stream
-    # or names such as 042, 42-preview, and UUIDs.
-    stream = str(equipment_id)
-    return [item for item in snapshot
-            if item.get('app') == ANALYSIS_APP and item.get('stream') == stream]
-
-
 def _unexpected_origin(item):
     origin = item.get('originType')
     label = str(item.get('originTypeStr') or '').strip().lower()
@@ -90,8 +81,7 @@ def analysis_output_state(matching):
     return 'no_video'
 
 
-def _serialize(row, tasks, base, snapshot):
-    matching = _matching_media(snapshot, row.id)
+def _serialize(row, tasks, base, matching):
     state = analysis_output_state(matching)
     tracks = next((item.get('tracks') or [] for item in matching or []
                    if item.get('tracks')), [])
@@ -136,13 +126,16 @@ def list_analysis_devices():
     try:
         rows = _equipment_query().order_by(Equipment.parent_id, Equipment.id).all()
         tasks = _task_summaries(_task_query().order_by(Algorithm_config.id).all())
-        snapshot = _media_snapshot(app=ANALYSIS_APP)
+        media = index_media_streams(_media_snapshot(app=ANALYSIS_APP))
         base = _base_url()
-        data = [_serialize(row, tasks.get(row.id, []), base, snapshot)
-                for row in rows
-                if tasks.get(row.id) or _matching_media(snapshot, row.id)]
+        data = []
+        for row in rows:
+            row_tasks = tasks.get(row.id, [])
+            matching = media_stream_rows(media, ANALYSIS_APP, str(row.id))
+            if row_tasks or matching:
+                data.append(_serialize(row, row_tasks, base, matching))
         return {'code': 200, 'msg': '获取成功', 'data': data,
-                'media_status_known': snapshot is not None}
+                'media_status_known': media is not None}
     except ValueError as exc:
         return {'code': 400, 'msg': str(exc)}
     except Exception:
@@ -175,8 +168,9 @@ def get_analysis_stream(equipment_id):
         tasks = _task_summaries(_task_query().filter(
             Algorithm_config.Equipment_id == equipment_id).order_by(
                 Algorithm_config.id).all()).get(equipment_id, [])
-        data = _serialize(row, tasks, _base_url(),
-                          _media_snapshot(app=ANALYSIS_APP, stream=str(equipment_id)))
+        media = index_media_streams(_media_snapshot(app=ANALYSIS_APP, stream=str(equipment_id)))
+        matching = media_stream_rows(media, ANALYSIS_APP, str(equipment_id))
+        data = _serialize(row, tasks, _base_url(), matching)
         if not data['available']:
             return {'code': 409, 'msg': data['reason'], 'data': data}
         return {'code': 200, 'msg': '获取成功', 'data': data,

@@ -2,7 +2,7 @@
 from data.resource_view_data import ResourceViewData
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.configs import *
 
 import json
@@ -12,6 +12,7 @@ import socket
 import threading
 import hashlib
 import uuid
+from weakref import WeakValueDictionary
 from datetime import timezone
 import paramiko
 import redis as host_metrics_redis
@@ -22,7 +23,7 @@ _HOST_METRICS_TTL = 10
 _HOST_METRICS_LOCK_TTL = 20
 _HOST_METRICS_REDIS = None
 _HOST_LOCAL_CACHE = {}
-_HOST_LOCAL_LOCKS = {}
+_HOST_LOCAL_LOCKS = WeakValueDictionary()
 _HOST_LOCAL_GUARD = threading.Lock()
 _HOST_READ_COMMAND = ("LC_ALL=C sh -c 'head -n 1 /proc/stat; sleep 0.5; "
                       "head -n 1 /proc/stat; cat /proc/meminfo'")
@@ -84,9 +85,9 @@ def _parse_host_sample(output):
     return result
 
 
-def _sample_host_metrics(item):
+def _sample_host_metrics(item, binding=None):
     host = str(item.computing_ip or '').strip()
-    if os.name == 'nt' and host in ('127.0.0.1', 'localhost', '::1'):
+    if os.name == 'nt' and not binding and host in ('127.0.0.1', 'localhost', '::1'):
         try:
             import psutil
             cpu = psutil.cpu_percent(interval=0.5)
@@ -112,7 +113,15 @@ def _sample_host_metrics(item):
         ssh.connect(host, username=user, password=password, timeout=3,
                     banner_timeout=3, auth_timeout=3,
                     allow_agent=False, look_for_keys=False)
-        _, stdout, _ = ssh.exec_command(_HOST_READ_COMMAND, timeout=4)
+        if binding:
+            from service.computing_identity_service import identity_probe_source
+            source = (identity_probe_source() + '\nimport os\n'
+                      + 'os.execv("/bin/sh", ["sh", "-c", ' + repr(_HOST_READ_COMMAND) + '])\n')
+            stdin, stdout, _ = ssh.exec_command('python3 -', timeout=4)
+            stdin.write('exec(' + ascii(source) + ')')
+            stdin.channel.shutdown_write()
+        else:
+            _, stdout, _ = ssh.exec_command(_HOST_READ_COMMAND, timeout=4)
         channel = stdout.channel
         deadline = time.monotonic() + 4
         chunks = []
@@ -135,6 +144,16 @@ def _sample_host_metrics(item):
         if channel.recv_exit_status() != 0:
             return _host_metrics_empty('error', '主机不支持当前 Linux 采集命令')
         output = b''.join(chunks).decode('utf-8', 'replace')
+        if binding:
+            from common.platform_host_identity import IdentityConflict, _verify_anchor
+            identity_line, _, output = output.partition('\n')
+            try:
+                identity = json.loads(identity_line)
+                if identity['host_uid'] != binding['host_uid']:
+                    raise IdentityConflict('当前地址对应另一台设备')
+                _verify_anchor(binding.get('anchor_uid'), identity.get('anchor_uid'))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                return _host_metrics_empty('error', '当前 SSH 主机的设备身份与已绑定设备不一致')
         return _parse_host_sample(output)
     except paramiko.AuthenticationException:
         return _host_metrics_empty('error', '主机 SSH 账号认证失败')
@@ -172,28 +191,34 @@ def _host_cached_metrics(client, key):
     return None
 
 
-def _host_local_metrics(item, key):
+def _host_local_metrics(item, key, binding=None):
     with _HOST_LOCAL_GUARD:
         lock = _HOST_LOCAL_LOCKS.setdefault(key, threading.Lock())
     if not lock.acquire(timeout=1):
         return _host_metrics_empty('collecting', '主机指标正在采集，请稍后刷新')
     try:
-        cached = _HOST_LOCAL_CACHE.get(key)
-        if cached and time.monotonic() - cached[0] < _HOST_METRICS_TTL:
+        with _HOST_LOCAL_GUARD:
+            now = time.monotonic()
+            expired = [name for name, (at, _) in _HOST_LOCAL_CACHE.items() if now - at >= _HOST_METRICS_TTL]
+            for name in expired:
+                _HOST_LOCAL_CACHE.pop(name)
+            cached = _HOST_LOCAL_CACHE.get(key)
+        if cached:
             return cached[1]
-        result = _sample_host_metrics(item)
-        _HOST_LOCAL_CACHE[key] = (time.monotonic(), result)
+        result = _sample_host_metrics(item, binding)
+        with _HOST_LOCAL_GUARD:
+            _HOST_LOCAL_CACHE[key] = (time.monotonic(), result)
         return result
     finally:
         lock.release()
 
 
-def _host_metrics_key(item):
-    identity = '{}\0{}'.format(item.computing_ip or '', getattr(item, 'computing_user', '') or '')
-    return 'v2:resource_view:host_metrics:' + hashlib.sha256(identity.encode('utf-8')).hexdigest()
+def _host_metrics_key(item, binding=None):
+    identity = ('machine:' + binding['host_uid']) if binding else ('registry:' + str(item.id))
+    return 'v3:resource_view:host_metrics:' + hashlib.sha256(identity.encode('utf-8')).hexdigest()
 
 
-def _publish_host_metrics(item, result):
+def _publish_host_metrics(item, result, binding=None):
     """Share the collector's fresh observation without adding a new sample.
 
     The collector keeps its existing cadence and lock. The UI uses the same
@@ -201,15 +226,15 @@ def _publish_host_metrics(item, result):
     Cache failure must not affect admission or cause a second SSH request.
     """
     try:
-        _host_metrics_client().setex(_host_metrics_key(item), _HOST_METRICS_TTL,
+        _host_metrics_client().setex(_host_metrics_key(item, binding), _HOST_METRICS_TTL,
                                      json.dumps(result, ensure_ascii=False))
         return True
     except Exception:
         return False
 
 
-def _get_host_metrics(item):
-    key = _host_metrics_key(item)
+def _get_host_metrics(item, binding=None):
+    key = _host_metrics_key(item, binding)
     token = uuid.uuid4().hex
     try:
         client = _host_metrics_client()
@@ -225,9 +250,9 @@ def _get_host_metrics(item):
                     return cached
             return _host_metrics_empty('collecting', '主机指标正在采集，请稍后刷新')
     except Exception:
-        return _host_local_metrics(item, key)
+        return _host_local_metrics(item, key, binding)
     try:
-        result = _sample_host_metrics(item)
+        result = _sample_host_metrics(item, binding)
         try:
             client.setex(key, _HOST_METRICS_TTL, json.dumps(result, ensure_ascii=False))
         except Exception:
@@ -243,98 +268,102 @@ def _get_host_metrics(item):
             pass  # The finite lock TTL recovers even if Redis is unavailable.
 
 
+def _resource_task_counts(configs):
+    from collections import Counter
+    from service.algorithm_config_safety import literal_data
+
+    def data_list(value):
+        try:
+            decoded = literal_data(value)
+            return decoded if isinstance(decoded, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    counts = Counter()
+    for config in configs:
+        resource_id = config.resource_id
+        if resource_id is not None:
+            counts[int(resource_id)] += 1
+        children = data_list(getattr(config, 'model_algo_data_ori', None))
+        if not children:
+            # Historical model_algo_data starts with the primary model.
+            children = data_list(getattr(config, 'model_algo_data', None))[1:]
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            candidate = child.get('resource_id')
+            if isinstance(candidate, (str, int)) and str(candidate).isdigit() and int(candidate) > 0:
+                counts[int(candidate)] += 1
+            elif resource_id is not None:
+                counts[int(resource_id)] += 1
+    return counts
+
+
+def _current_resource_slots(resources):
+    """Choose the machine-ID sample ahead of older address-based duplicates."""
+    from common.platform_host_identity import card_serial
+    slots = {}
+    for card in resources:
+        logical_id = card['dev_id']
+        key = ('slot', logical_id) if logical_id is not None else ('legacy', card['id'])
+        slots.setdefault(key, []).append(card)
+    for cards in slots.values():
+        current = min(cards, key=lambda card: (
+            not bool(card['identity_sample']), card['sample_age'] is None,
+            float(card['sample_age'] or 0), card['id']))
+        serial = card_serial(current['dev_get_sn'])
+        related_ids = [card['id'] for card in cards
+                       if not serial or card_serial(card['dev_get_sn']) in (None, serial)]
+        yield current, serial, related_ids
+
+
+def _current_resources(resources, counts, now):
+    grouped = {}
+    for current, serial, related_ids in _current_resource_slots(resources):
+        resource = {key: value for key, value in current.items() if key not in ('sample_age', 'sample_token')}
+        age = float(current['sample_age']) if current['sample_age'] is not None else None
+        resource['card_data_updated_at'] = (
+            (now - timedelta(seconds=age)).isoformat(timespec='milliseconds')
+            if age is not None and age >= 0 else None)
+        resource['resource_num'] = sum(counts.get(resource_id, 0) for resource_id in related_ids)
+        resource['identity_sample'] = bool(current['identity_sample'])
+        label = 'YGSJ-TPU-' + (serial or str(current['dev_get_target'] or '未知'))
+        grouped.setdefault(label, []).append(resource)
+    return grouped
+
+
 class ResourceViewService:
-    # 算力资源相关业务逻辑
     @staticmethod
     def get_resource_data():
-        """
-        获取算力资源数据
-        """
+        """Get current host and card measurements without using IP as identity."""
         try:
-            # 查询所有机器设备关联
-            Computing_data = ResourceViewData.get_all_computing_equipment()
+            from service.computing_identity_service import binding_map
 
-            # 初始化最终结果
-            final_result = []
+            hosts = [host for host in ResourceViewData.get_all_computing_equipment()
+                     if int(getattr(host, 'server_type', 1) or 1) == 1]
+            if not hosts:
+                return True, []
+            bindings = binding_map()
+            counts = _resource_task_counts(ResourceViewData.get_valid_algorithm_configs())
+            result = []
+            for host in hosts:
+                binding = bindings.get(host.id)
+                host_metrics = _get_host_metrics(host, binding)
+                cards = ResourceViewData.get_resource_usage_by_computing_id(host.id)
+                now = datetime.now(timezone.utc)
+                result.append({
+                    'computing_id': host.id,
+                    'computing_ip': host.computing_ip,
+                    'computing_name': host.computing_name,
+                    'host_uid': binding['host_uid'] if binding else None,
+                    **host_metrics,
+                    'host_metrics_server_time': now.isoformat(timespec='milliseconds'),
+                    'grouped_resources': _current_resources(cards, counts, now),
+                })
+            return True, result
+        except Exception:
+            return False, '获取算力资源数据失败，请检查服务和数据库'
 
-            # 当机器设备存在时查询下级对应数据并父子返回
-            if Computing_data:
-                # 获取所有有效的算法配置数据，避免重复查询数据库
-                all_algorithm_configs = ResourceViewData.get_valid_algorithm_configs()
-                # 遍历每个设备
-                for i in Computing_data:
-                    if int(getattr(i,'server_type',1) or 1) != 1:
-                        continue
-                    # 查找该设备的所有资源使用情况
-                    resource_list = convert_folder_to_dict_list(
-                        ResourceViewData.get_resource_usage_by_computing_id(i.id),
-                        ['id', 'dev_ip', 'dev_id', 'board_temp', 'chip_temp', 'dev_get_sn', 'dev_get_target',
-                         'mem_used_mem_total', 'memory_usage_rate', 'tpu_util', 'updated_at']
-                    )
-
-                    # 组装数据 -- 将 dev_get_sn 和 dev_get_target 组合为字符串作为 key 并分组
-                    grouped_data = {}
-
-                    for resource in resource_list:
-                        # Database update time, not a fabricated sampling time.
-                        updated_at = resource.pop('updated_at', None)
-                        resource['card_data_updated_at'] = (
-                            updated_at.isoformat() if hasattr(updated_at, 'isoformat')
-                            else str(updated_at) if updated_at is not None else None)
-                        # 查找算法配置表中对应的id数量
-                        resource_id = resource.get('id')
-                        # 获取该资源相关的所有算法配置
-                        related_configs = [config for config in all_algorithm_configs if
-                                           config.resource_id == resource_id]
-
-                        # 基础计数：算法配置条数
-                        base_count = len(related_configs)
-
-                        # 额外计数：检查 model_algo_data 字段
-                        extra_count = 0
-                        for config in related_configs:
-                            if config.model_algo_data:
-                                try:
-                                    # 解析 JSON 数组
-                                    algo_data_list = json.loads(config.model_algo_data)
-                                    # 如果解析成功且为列表，则计算元素数量（减去 1，因为基础计数已经算过这条配置）
-                                    if isinstance(algo_data_list, list):
-                                        extra_count += len(algo_data_list)
-                                except (json.JSONDecodeError, TypeError):
-                                    # 如果解析失败，不增加额外计数
-                                    pass
-
-                        # 总数 = 基础计数 + 额外计数
-                        resource['resource_num'] = base_count + extra_count
-                        # resource['resource_num'] = len(
-                        #     [config for config in all_algorithm_configs if config.resource_id == resource_id]
-                        # )
-
-                        # 使用 dev_get_sn 和 dev_get_target 生成唯一的 key
-                        key = f"YGSJ-TPU-{resource['dev_get_sn']}"
-                        # 将资源按 key 进行分组
-                        if key not in grouped_data:
-                            grouped_data[key] = []
-                        grouped_data[key].append(resource)
-
-                    # Host metrics are live SSH samples, not database status values.
-                    host_metrics = _get_host_metrics(i)
-                    # 将每个设备及其对应的资源分组加入最终结果
-                    from service.computing_identity_service import uid_map
-                    if '_identity_uids' not in locals(): _identity_uids=uid_map()
-                    final_result.append({
-                        'computing_id': i.id,  # 设备基本信息id
-                        'computing_ip': i.computing_ip,  # 设备基本信息ip
-                        'computing_name': i.computing_name,
-                        'host_uid': _identity_uids.get(i.id),  # 设备基本信息名称
-                        **host_metrics,
-                        'host_metrics_server_time': _host_timestamp(),
-                        'grouped_resources': grouped_data  # 该设备的所有资源分组
-                    })
-
-            return True, final_result
-        except Exception as e:
-            return False, f'获取算力资源数据失败: {str(e)}'
 
     # 算力设备相关业务逻辑
     @staticmethod
@@ -379,7 +408,7 @@ class ResourceViewService:
             pagination = ResourceViewData.get_computing_equipment_paginated(page, per_page)
 
             # 构造返回数据
-            from service.computing_identity_service import uid_map
+            from service.computing_identity_service import SAVED_SECRET_MASK, uid_map
             _identity_uids=uid_map()
             data_list = [
                 {
@@ -387,7 +416,8 @@ class ResourceViewService:
                     'computing_ip': item.computing_ip,
                     'computing_name': item.computing_name,
                     'computing_user': item.computing_user,
-                    'computing_password': item.computing_password,
+                    # The existing edit form submits this placeholder to keep the saved value.
+                    'computing_password': SAVED_SECRET_MASK if item.computing_password else '',
                     'computing_code': item.computing_code,
                     'host_uid': _identity_uids.get(item.id),
                     'created_at': item.created_at,

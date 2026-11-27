@@ -30,11 +30,11 @@ def initialize(root, models_root, phase, env=None):
         if phase == 'device':
             report['device'] = ensure_local_device(connection, env.get('TARGET_IP'),
                 env.get('BOOTSTRAP_SSH_USER') or env.get('BOX_USER'),
-                env.get('BOOTSTRAP_SSH_PASSWORD') or env.get('BOX_PASS'))
+                env.get('BOOTSTRAP_SSH_PASSWORD') or env.get('BOX_PASS'), root=root)
             report['collector_updated'] = configure_local_collector(root, report['device']['computing_id'])
         else:
             device = report['device']
-            bind_local_resources(connection, device['ip'], device['computing_id'])
+            bind_local_resources(connection, device['ip'], device['computing_id'], root=root)
     finally:
         connection.close()
     report['family'] = detect_driver_family()

@@ -1,10 +1,12 @@
 import time
+import configparser
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from kafka import KafkaConsumer
 from kafka.structs import TopicPartition, OffsetAndMetadata
 from dbutils.pooled_db import PooledDB
 import json
+import math
 import pymysql
 import os
 import sys
@@ -33,12 +35,16 @@ import push_outbox
 KAFKA_HOST = '127.0.0.1'
 
 
-# 数据库参数
-DB_HOST = '127.0.0.1'
-DB_user = 'admin'
+# Prefer mounted site settings while preserving the native installer and environment fallback.
+_deployment_config = configparser.ConfigParser(interpolation=None)
+_deployment_path = _algorithm_package.parent / 'Config_files/config.ini'
+_deployment_config.read(str(_deployment_path), encoding='utf-8')
+_database = _deployment_config['database'] if _deployment_config.has_section('database') else {}
+DB_HOST = _database.get('DB_HOST', '127.0.0.1')
+DB_user = _database.get('DB_USER', 'admin')
 DB_password = '__ONECLICK_DB_PASSWORD__'
-if not DB_password or DB_password == "__ONECLICK_" + "DB_PASSWORD__":
-    DB_password = _required_site_value("AIP_DB_PASSWORD")
+if not DB_password or DB_password == '__ONECLICK_' + 'DB_PASSWORD__':
+    DB_password = _database.get('DB_PASSWORD') or _required_site_value('AIP_DB_PASSWORD')
 
 # 设置日志：参数
 """
@@ -65,7 +71,8 @@ logging.basicConfig(level=logging.INFO, handlers=[log_handler, console_handler])
 # 数据库连接池
 pool = PooledDB(
     pymysql, maxconnections=10, host=DB_HOST, user=DB_user, password=DB_password,
-    database='seal_system', read_timeout=30, write_timeout=30, charset='utf8'
+    port=int(_database.get('DB_PORT', 3306)), database=_database.get('DB_NAME', 'seal_system'),
+    read_timeout=30, write_timeout=30, charset='utf8mb4'
 )
 
 
@@ -73,7 +80,6 @@ pool = PooledDB(
 def upload_data(Algorithm_conf_id, res_type, Mine_id, Equipment_id, Equipment_parent_id,
                 carousel_images_list,ori_images_list, result_count, result_count_time, template_id, template_type_id, Algorithm_library_id, res_time,Entering_num,Exiting_num,all_Entering_num=None,all_Exiting_num=None,
                 algorithm_name = None, conf_name = None,conf_img_resolution = None, equipment_type = None, equipment_name = None,mine_name = None,warning_message =  None,warning_video = None,analysis_type = None,analysis_case =None, event_key=None, count_state_managed=False):
-    print(carousel_images_list)
     conn = pool.connection()
     try:
         with conn.cursor() as cursor:
@@ -107,10 +113,10 @@ def upload_data(Algorithm_conf_id, res_type, Mine_id, Equipment_id, Equipment_pa
                 Algorithm_conf_id, res_type, Mine_id, Equipment_id, Equipment_parent_id, str(carousel_images_list),str(ori_images_list),
                 result_count, result_count_time, template_id, template_type_id, Algorithm_library_id, res_time,Entering_num,Exiting_num,
                 algorithm_name, conf_name,conf_img_resolution,equipment_type,equipment_name,mine_name,0,warning_message,warning_video,analysis_type,analysis_case)
-            logging.info(f"待插入 SQL 的参数: {values}")  # 查看参数是否正常
             cursor.execute(sql, values)
             #人员计数算法结果修改配置
-            if not count_state_managed and Entering_num is not None and Exiting_num is not None:
+            if (not count_state_managed and Entering_num is not None and Exiting_num is not None
+                    and all_Entering_num is not None and all_Exiting_num is not None):
                 update_config_sql = """
                     UPDATE `t_algorithm_config`
                     SET `all_Entering_num` = %s, `all_Exiting_num` = %s
@@ -128,7 +134,7 @@ def upload_data(Algorithm_conf_id, res_type, Mine_id, Equipment_id, Equipment_pa
         return True
     except Exception as e:
         conn.rollback()
-        logging.error(f"视频AI识别分析管理平台数据写入失败!: {e}")
+        logging.error('Alarm database write failed (%s)', type(e).__name__)
         raise
     finally:
         conn.close()
@@ -315,20 +321,42 @@ def process_alarm(parsed_dict, event_key):
     }, event_key)
 
 
+ALARM_SCALAR_FIELDS = (
+    'Algorithm_config_id', 'Algorithm_library_id', 'Equipment_id', 'Equipment_parent_id',
+    'Mine_id', 'res_type', 'result_count', 'result_count_time', 'template_id',
+    'template_type_id', 'res_time', 'Entering_num', 'Exiting_num', 'all_Entering_num',
+    'all_Exiting_num', 'equipment_ip', 'mine_code', 'warning_message', 'warning_video',
+    'analysis_type', 'analysis_case',
+)
+INVALID_ROW_CODES = {1048, 1264, 1265, 1292, 1366, 1406}
+
+
 def consume_message(consumer, message):
     event_key = push_outbox.kafka_event_key(message.topic, message.partition, message.offset)
+    raw = message.value.decode('utf-8', 'replace')
     try:
         parsed_dict = json.loads(message.value.decode('utf-8'))
         if not isinstance(parsed_dict, dict):
             raise ValueError('Alarm must be an object')
-    except (UnicodeError, ValueError):
-        push_outbox.quarantine(message.value.decode('utf-8', 'replace'), event_key)
+        for field in ALARM_SCALAR_FIELDS:
+            value = parsed_dict.get(field)
+            if value is not None and (type(value) not in (int, float, str)
+                                      or isinstance(value, float) and not math.isfinite(value)):
+                raise ValueError('Invalid alarm scalar field')
+    except (UnicodeError, ValueError, RecursionError):
+        push_outbox.quarantine(raw, event_key)
     else:
         alarm_event_id = parsed_dict.get('alarm_event_id')
-        if _valid_count_alarm_id(alarm_event_id):
-            event_key = 'person-count:' + alarm_event_id
-        process_alarm(parsed_dict, event_key)
-    # Acknowledge only after MySQL ingestion and durable queue insertion.
+        delivery_key = 'person-count:' + alarm_event_id if _valid_count_alarm_id(alarm_event_id) else event_key
+        try:
+            process_alarm(parsed_dict, delivery_key)
+        except (pymysql.err.DataError, pymysql.err.IntegrityError) as error:
+            if not error.args or error.args[0] not in INVALID_ROW_CODES:
+                raise
+            logging.warning('Quarantined invalid alarm at topic=%s partition=%s offset=%s code=%s',
+                            message.topic, message.partition, message.offset, error.args[0])
+            push_outbox.quarantine(raw, event_key, reason='数据库拒绝报警字段')
+    # Acknowledge only after ingestion or quarantine was committed durably.
     try:
         metadata = OffsetAndMetadata(message.offset + 1, '', -1)
     except TypeError:  # kafka-python 2.0 compatibility

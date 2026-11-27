@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -17,6 +17,18 @@ from urllib.parse import quote
 from sqlalchemy import func, literal, select, text
 
 from service.alarm_retention_files import MEDIA_FIELDS, MEDIA_EXTENSIONS, MediaResolver, media_references
+
+
+MEMO_ENTRIES = 2048
+MEMO_KEY_LENGTH = 1024
+
+
+def _remember(cache, key, value):
+    if len(str(key)) <= MEMO_KEY_LENGTH:
+        if len(cache) >= MEMO_ENTRIES:
+            cache.popitem(last=False)
+        cache[key] = value
+    return value
 
 
 def _legacy_needles(name):
@@ -58,15 +70,15 @@ class _PreparedResolver(MediaResolver):
         self.mappings = resolver.mappings
         self.roots = resolver.roots
         self.root_signatures = resolver.root_signatures
-        self._references = {}
-        self._links = {}
+        self._references = OrderedDict()
+        self._links = OrderedDict()
 
     def resolve(self, value):
         if not isinstance(value, str):
             return None
-        if value not in self._references:
-            self._references[value] = super().resolve(value)
-        return self._references[value]
+        if value in self._references:
+            return self._references[value]
+        return _remember(self._references, value, super().resolve(value))
 
     def _candidate(self, root, relative):
         import os
@@ -83,9 +95,11 @@ class _PreparedResolver(MediaResolver):
             for component in (candidate, *candidate.parents):
                 if component == root:
                     break
-                if component not in self._links:
-                    self._links[component] = component.is_symlink()
-                if self._links[component]:
+                if component in self._links:
+                    is_link = self._links[component]
+                else:
+                    is_link = _remember(self._links, component, component.is_symlink())
+                if is_link:
                     return None
         except (ValueError, OSError):
             return None

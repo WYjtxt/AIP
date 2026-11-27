@@ -1,5 +1,6 @@
 """Native-size annotated alarm clips with a lossless, time-bounded I420 frame buffer."""
 from templates import alarm_directory
+import ctypes
 import os
 import json
 import re
@@ -11,11 +12,23 @@ import threading
 import tempfile
 import subprocess
 from collections import deque
+from contextlib import contextmanager, suppress
+from functools import lru_cache
 
 import cv2
 import numpy as np
 
 from config import common as cm
+
+try:
+    from runtime_acceleration.field104_native_overlay import fast_project_overlay as _fast_project_overlay
+except ImportError:
+    def _fast_project_overlay(annotated, reference, native, nearest_limits):
+        return False
+try:
+    from runtime_acceleration import field104_alarm_delta as _native_delta
+except ImportError:
+    _native_delta = None
 
 logger = logging.getLogger('alarm_video')
 
@@ -29,6 +42,13 @@ _PACKBITS = [cv2.IMWRITE_TIFF_COMPRESSION, 32773]
 # 满足，实测 30s+）。50s 裕量 ≈ 完整覆盖 ≤40s 会话 + 收尾滞后；更长会话头部滚出缓冲，
 # 照存并打 warning（视频短于应有时长）。内存 ≈随所选码流分辨率、帧率与场景变化。
 _KEEP_SEC = _PRE_SEC + _POST_SEC + 50.0
+# The time window alone cannot bound RAM at high resolution or high scene motion.
+try:
+    _BUFFER_MIB = int(os.environ.get('ALARM_VIDEO_BUFFER_MIB', '512'))
+except ValueError:
+    _BUFFER_MIB = 512
+_BUFFER_BYTES = max(64, min(2048, _BUFFER_MIB)) * 1024**2
+_CLIP_SPOOL_THRESHOLD = 64 * 1024**2
 _MAX_CONCURRENT_SAVES = 3
 _MAX_COUNT_IMAGES = 512
 _COUNT_IMAGE_NAME = re.compile(r'alarm_[0-9a-f]{32}_[0-9]{6,}\.jpg\Z')
@@ -125,16 +145,68 @@ def _discard(path):
         pass
 
 
-def _archive_i420(annotated, native):
+@lru_cache(maxsize=16)
+def _nearest_limits(source, target, vertical):
+    """Get destination intervals from this OpenCV build's actual nearest-neighbour map."""
+    indices = np.arange(source, dtype=np.uint32)
+    codes = np.column_stack((indices & 255, (indices >> 8) & 255, indices >> 16)).astype(np.uint8)
+    codes = codes.reshape((-1, 1, 3) if vertical else (1, -1, 3))
+    size = (1, target) if vertical else (target, 1)
+    colors = cv2.resize(codes, size, interpolation=cv2.INTER_NEAREST).reshape(-1, 3)
+    gray = cv2.resize(np.ascontiguousarray(codes[:, :, 0]), size, interpolation=cv2.INTER_NEAREST)
+    if not np.array_equal(gray.ravel(), colors[:, 0]):
+        return None
+    mapped = colors.astype(np.uint32) @ np.array([1, 256, 65536], np.uint32)
+    return np.searchsorted(mapped, np.arange(source + 1)).astype(np.int32)
+
+
+def _project_overlay(annotated, reference, native):
+    if _fast_project_overlay(annotated, reference, native, _nearest_limits):
+        return
+    # Each unequal channel contributes 29, 150 or 76 to grayscale, so every
+    # changed BGR pixel has a nonzero mask even for one-bit colour differences.
+    changed = cv2.cvtColor(cv2.compare(annotated, reference, cv2.CMP_NE), cv2.COLOR_BGR2GRAY)
+    count = cv2.countNonZero(changed)
+    if not count:
+        return
+    h, w = changed.shape
+    nh, nw = native.shape[:2]
+    integer = nw % w == 0 and nh % h == 0
+    limit = min(h*w//8, nw*nh//20) if integer else min(h*w//30, nw*nh//100)
+    if count <= limit and native.flags.c_contiguous and w <= nw <= 4*w and h <= nh <= 4*h:
+        xs = _nearest_limits(w, nw, False)
+        ys = _nearest_limits(h, nh, True)
+        if xs is not None and ys is not None:
+            pts = cv2.findNonZero(changed).reshape(-1, 2)
+            x, y = pts[:, 0], pts[:, 1]
+            colors = annotated[y, x]
+            if integer and np.all(np.diff(xs) == nw//w) and np.all(np.diff(ys) == nh//h):
+                view = native.reshape(h, nh//h, w, nw//w, 3)
+                view[y, :, x, :, :] = colors[:, None, None, :]
+            else:
+                x0, y0 = xs[x], ys[y]
+                widths, heights = xs[x+1] - x0, ys[y+1] - y0
+                for dy in range(int(heights.max())):
+                    for dx in range(int(widths.max())):
+                        take = (heights > dy) & (widths > dx)
+                        native[y0[take] + dy, x0[take] + dx] = colors[take]
+            return
+    mask = cv2.resize(changed, (nw, nh), interpolation=cv2.INTER_NEAREST)
+    colors = cv2.resize(annotated, (nw, nh), interpolation=cv2.INTER_NEAREST)
+    cv2.copyTo(colors, mask, native)
+
+
+def _archive_bgr(annotated, native, reference=None):
     if native is not None and native.shape[:2] != annotated.shape[:2]:
-        native_size = native.shape[1], native.shape[0]
-        ref = cv2.resize(native, (annotated.shape[1], annotated.shape[0]), interpolation=cv2.INTER_LINEAR)
-        unchanged = cv2.inRange(cv2.absdiff(ref, annotated), (0, 0, 0), (0, 0, 0))
-        mask = cv2.resize(cv2.bitwise_not(unchanged), native_size, interpolation=cv2.INTER_NEAREST)
-        colors = cv2.resize(annotated, native_size, interpolation=cv2.INTER_NEAREST)
-        # Native belongs to this decoded frame. Preview consumers only see annotated.
-        cv2.copyTo(colors, mask, native)
+        if reference is None or reference.shape != annotated.shape or reference.dtype != annotated.dtype:
+            reference = cv2.resize(native, (annotated.shape[1], annotated.shape[0]), interpolation=cv2.INTER_LINEAR)
+        if reference is not annotated:
+            _project_overlay(annotated, reference, native)
         annotated = native
+    return annotated
+
+
+def _to_i420(annotated):
     # H.264 4:2:0 requires even dimensions. Replicate only the final row/column as needed.
     h, w = annotated.shape[:2]
     if h % 2 or w % 2:
@@ -142,7 +214,243 @@ def _archive_i420(annotated, native):
     return cv2.cvtColor(annotated, cv2.COLOR_BGR2YUV_I420)
 
 
-def _unpack(data):
+def _archive_i420(annotated, native, reference=None):
+    return _to_i420(_archive_bgr(annotated, native, reference))
+
+
+def _load_zstd():
+    try:
+        lib = ctypes.CDLL('libzstd.dll' if os.name == 'nt' else 'libzstd.so.1')
+        pointer, size = ctypes.c_void_p, ctypes.c_size_t
+        lib.ZSTD_compressBound.argtypes = [size]
+        lib.ZSTD_compressBound.restype = size
+        lib.ZSTD_compress.argtypes = [pointer, size, pointer, size, ctypes.c_int]
+        lib.ZSTD_compress.restype = size
+        lib.ZSTD_decompress.argtypes = [pointer, size, ctypes.c_char_p, size]
+        lib.ZSTD_decompress.restype = size
+        lib.ZSTD_isError.argtypes = [size]
+        lib.ZSTD_isError.restype = ctypes.c_uint
+        return lib
+    except (OSError, AttributeError):
+        logger.warning('libzstd unavailable, using lossless TIFF for the alarm ring')
+        return None
+
+
+_ZSTD = _load_zstd()
+
+
+class _FramePacker:
+    """Store four frames against one owned I420 plane. Each delta decodes independently."""
+
+    def __init__(self):
+        self.codec = _ZSTD
+        self.anchor = None
+        self.remaining = 0
+        self.delta = None
+        self.output = None
+
+    def pack(self, plane):
+        if self.codec is not None:
+            if not self.remaining or self.anchor.shape != plane.shape:
+                self.anchor, self.remaining = plane, 3
+                return plane, None
+            if self.delta is None or self.delta.shape != plane.shape:
+                self.delta = np.empty_like(plane)
+                self.output = ctypes.create_string_buffer(self.codec.ZSTD_compressBound(plane.nbytes))
+            # uint8 subtraction wraps modulo 256. Adding the same anchor restores every byte.
+            np.subtract(plane, self.anchor, out=self.delta)
+            size = self.codec.ZSTD_compress(self.output, len(self.output),
+                                            self.delta.ctypes.data, plane.nbytes, 1)
+            if not self.codec.ZSTD_isError(size):
+                if size >= plane.nbytes:
+                    self.anchor, self.remaining = plane, 3
+                    return plane, None
+                self.remaining -= 1
+                return self.anchor, self.output[:size]
+            logger.warning('Alarm ring compression failed, using lossless TIFF')
+            self.codec = self.anchor = self.delta = self.output = None
+        ok, enc = cv2.imencode('.tiff', plane, _PACKBITS)
+        if not ok:
+            raise ValueError('Cannot buffer alarm frame')
+        return enc.tobytes()
+
+
+class _ArchiveBuffer:
+    def __init__(self):
+        self.native = _native_delta.create_packer() if _native_delta is not None else None
+        self.legacy = _FramePacker()
+
+    def pack(self, frame, native, reference=None):
+        bgr = _archive_bgr(frame, native, reference)
+        if self.native is not None:
+            try:
+                return self.native.pack(bgr, _to_i420)
+            except (ValueError, MemoryError, OSError, ctypes.ArgumentError):
+                logger.exception('Native alarm buffer failed; using the verified I420 buffer')
+                self.native = None
+        return self.legacy.pack(_to_i420(bgr))
+
+
+def _memory_cost(data):
+    if _native_delta is not None and isinstance(data, _native_delta.Frame):
+        block = data.block
+        return id(block), block.key.nbytes + sum(map(len, block.deltas)), 0
+    if isinstance(data, tuple):
+        anchor, delta = data
+        return id(anchor), anchor.nbytes, len(delta) if delta is not None else 0
+    return id(data), len(data), 0
+
+
+class _SpooledFrame:
+    def __init__(self, spool, kind, key, value):
+        self.spool, self.kind, self.key, self.value = spool, kind, key, value
+
+
+def _read_clip_span(stream, span):
+    start, size = span
+    stream.seek(start)
+    data = stream.read(size)
+    if len(data) != size:
+        raise OSError('Incomplete read from the alarm clip spool')
+    return data
+
+
+class _SpooledDeltas:
+    def __init__(self, stream, spans):
+        self.stream, self.spans = stream, spans
+
+    def __len__(self):
+        return len(self.spans)
+
+    def __getitem__(self, index):
+        return _read_clip_span(self.stream, self.spans[index])
+
+
+class _ClipSpool:
+    """Keep exact compressed frame blocks in a private temporary file."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.blocks = {}
+        self.cache_key = self.cache = None
+
+    def _write(self, data):
+        span = self.stream.tell(), memoryview(data).nbytes
+        if self.stream.write(data) != span[1]:
+            raise OSError('Incomplete write to the alarm clip spool')
+        return span
+
+    def _read(self, span):
+        return _read_clip_span(self.stream, span)
+
+    def freeze(self, data):
+        if isinstance(data, os.PathLike):
+            # Durable counting fallback JPEGs already live on disk.
+            return data
+        if _native_delta is not None and isinstance(data, _native_delta.Frame):
+            block = data.block
+            key = 'native', id(block)
+            if key not in self.blocks:
+                self.blocks[key] = self._write(block.key), block.key.shape, block.bgr, []
+            deltas = self.blocks[key][3]
+            for i in range(len(deltas), data.index):
+                deltas.append(self._write(block.deltas[i]))
+            return _SpooledFrame(self, 'native', key, data.index)
+        if isinstance(data, tuple):
+            anchor, delta = data
+            key = 'i420', id(anchor)
+            if key not in self.blocks:
+                self.blocks[key] = self._write(anchor), anchor.shape
+            return _SpooledFrame(self, 'i420', key, None if delta is None else self._write(delta))
+        return _SpooledFrame(self, 'tiff', None, self._write(data))
+
+    def restore(self, frame):
+        if frame.kind == 'tiff':
+            return self._read(frame.value)
+        if self.cache_key != frame.key:
+            self.cache_key, self.cache = None, None
+            span, shape, *extra = self.blocks[frame.key]
+            plane = np.frombuffer(self._read(span), dtype=np.uint8).reshape(shape)
+            if frame.kind == 'native':
+                bgr, deltas = extra
+                block = _native_delta.Block.__new__(_native_delta.Block)
+                block.key, block.bgr = plane, bgr
+                # A noisy 32-frame block can be large even after compression.
+                # The existing decoder reads each delta exactly when it needs it.
+                block.deltas = _SpooledDeltas(self.stream, deltas)
+                self.cache = block
+            else:
+                self.cache = plane
+            self.cache_key = frame.key
+        if frame.kind == 'native':
+            restored = _native_delta.Frame(self.cache)
+            restored.index = frame.value
+            return restored
+        return self.cache, None if frame.value is None else self._read(frame.value)
+
+
+def _clip_memory(frames):
+    seen = set()
+    total = 0
+    for _, data in frames:
+        if isinstance(data, os.PathLike):
+            continue
+        key, shared, frame_bytes = _memory_cost(data)
+        if key not in seen:
+            total += shared
+            seen.add(key)
+        total += frame_bytes
+    return total
+
+
+@contextmanager
+def _spool_clip(frames, directory):
+    """Release pinned ring blocks only after every clip frame is safely written."""
+    memory = _clip_memory(frames)
+    if memory >= _CLIP_SPOOL_THRESHOLD:
+        stream = None
+        try:
+            # Keep room for another comparable clip and the encoder's output.
+            if shutil.disk_usage(directory).free > 2 * memory + _CLIP_SPOOL_THRESHOLD:
+                stream = tempfile.TemporaryFile(mode='w+b', buffering=0, prefix='.alarm-frames-', dir=directory)
+                spool = _ClipSpool(stream)
+                on_disk = [(stamp, spool.freeze(data)) for stamp, data in frames]
+                stream.flush()
+                # The caller needs only timestamps for the finalized coverage sidecar.
+                frames[:] = on_disk
+        except (OSError, MemoryError):
+            logger.warning('Clip spool unavailable; encoding from the original frame snapshot', exc_info=True)
+            if stream is not None:
+                with suppress(OSError):
+                    stream.close()
+                stream = None
+        try:
+            yield
+        finally:
+            if stream is not None:
+                with suppress(OSError):
+                    stream.close()
+    else:
+        yield
+
+
+def _unpack(data, reader=None):
+    if isinstance(data, _SpooledFrame):
+        data = data.spool.restore(data)
+    if _native_delta is not None and isinstance(data, _native_delta.Frame):
+        if reader is None:
+            reader = _native_delta.Reader()
+        return reader.unpack(data, _to_i420)
+    if isinstance(data, tuple):
+        anchor, payload = data
+        if payload is None:
+            return anchor
+        plane = np.empty_like(anchor)
+        size = _ZSTD.ZSTD_decompress(plane.ctypes.data, plane.nbytes, payload, len(payload))
+        if size != plane.nbytes:
+            raise ValueError('Invalid lossless alarm delta')
+        np.add(plane, anchor, out=plane)
+        return plane
     if isinstance(data, os.PathLike):
         image = cv2.imread(os.fspath(data))
         if image is None:
@@ -152,6 +460,34 @@ def _unpack(data):
     if plane is None:
         raise ValueError("Invalid lossless alarm buffer")
     return plane
+
+
+def _frame_dimensions(data):
+    if _native_delta is not None and isinstance(data, _native_delta.Frame):
+        plane = data.block.key
+        if data.block.bgr:
+            height, width = plane.shape[:2]
+            return height + height % 2, width + width % 2
+    else:
+        plane = data[0] if isinstance(data, tuple) else _unpack(data)
+    height, width = plane.shape
+    return height * 2 // 3, width
+
+
+@lru_cache(maxsize=8)
+def _has_hardware_encoder(binary):
+    if not binary:
+        return False
+    try:
+        result = subprocess.run([binary, '-nostdin', '-hide_banner', '-encoders'],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=4)
+    except (OSError, subprocess.SubprocessError):
+        # An inconclusive probe must not remove the established hardware attempt.
+        return True
+    if result.returncode or b'Encoders:' not in result.stdout:
+        return True
+    encoders = re.findall(rb'^\s*V[A-Z.]+\s+([a-z0-9_]+)\s', result.stdout, re.MULTILINE)
+    return not encoders or b'h264_bm' in encoders
 
 
 def _write_count_coverage(path, conf_name, start_ts, alarm_ts, frames, fps, images=()):
@@ -207,9 +543,83 @@ class _Recorder:
         self._source_last_time = 0.0
         self._buf = deque()                  # (frame timestamp, packed I420)
         self._buf_lock = threading.Lock()
+        self._buf_bytes = 0
+        self._buf_backing = {}
+        self._budget_drops = 0
         self._saving = 0
         self._saving_lock = threading.Lock()
-        threading.Thread(target=self._encode_loop, name='alarm_video_buf', daemon=True).start()
+        self._encode_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_SAVES)
+        self._stop = threading.Event()
+        self._children = set()
+        self._children_lock = threading.Lock()
+        self._worker = threading.Thread(target=self._encode_loop, name='alarm_video_buf', daemon=True)
+        self._worker.start()
+
+    def _evict(self):
+        _, data = self._buf.popleft()
+        key, _, frame_bytes = _memory_cost(data)
+        count, shared = self._buf_backing[key]
+        self._buf_bytes -= frame_bytes
+        if count == 1:
+            self._buf_bytes -= shared
+            del self._buf_backing[key]
+        else:
+            self._buf_backing[key] = count - 1, shared
+
+    def _buffer(self, ts, data):
+        key, shared, frame_bytes = _memory_cost(data)
+        count, old_shared = self._buf_backing.get(key, (0, 0))
+        self._buf_backing[key] = count + 1, shared
+        self._buf_bytes += shared - old_shared + frame_bytes
+        self._buf.append((ts, data))
+        cutoff = ts - _KEEP_SEC
+        while self._buf and self._buf[0][0] < cutoff:
+            self._evict()
+        while self._buf and self._buf_bytes > _BUFFER_BYTES:
+            self._evict()
+            self._budget_drops += 1
+            if self._budget_drops == 1 or self._budget_drops % 250 == 0:
+                logger.warning('Alarm ring reached its byte budget; removed %d oldest frames',
+                               self._budget_drops)
+
+    @contextmanager
+    def _process(self, command, **kwargs):
+        with self._children_lock:
+            if self._stop.is_set():
+                raise OSError('Alarm recorder is stopping')
+            proc = subprocess.Popen(command, **kwargs)
+            self._children.add(proc)
+        try:
+            yield proc
+        finally:
+            try:
+                if proc.poll() is None:
+                    with suppress(ProcessLookupError):
+                        proc.kill()
+                proc.wait(timeout=2)
+            finally:
+                if proc.stdin is not None:
+                    with suppress(OSError):
+                        proc.stdin.close()
+                with self._children_lock:
+                    self._children.discard(proc)
+
+    def close(self):
+        self._stop.set()
+        with self._children_lock:
+            for child in self._children:
+                with suppress(OSError):
+                    child.kill()
+        self._worker.join(timeout=1.0)
+        with self._buf_lock:
+            self._buf.clear()
+            self._buf_backing.clear()
+            self._buf_bytes = 0
+        while True:
+            try:
+                self._in_q.get_nowait()
+            except queue.Empty:
+                return
 
     def frame_timestamp(self, arrival=None, frame_no=None, rate=0, epoch=None):
         """Resolve the frame clock once for analysis and archive sampling."""
@@ -231,12 +641,14 @@ class _Recorder:
 
     # ---- 喂帧（聚合线程/解码回调热路径：只做采样判断 + 非阻塞入队） ----
     def feed(self, frame_bgr, arrival=None, frame_no=None, rate=0, epoch=None, native=None,
-             timestamp=None):
+             timestamp=None, reference=None):
+        if self._stop.is_set():
+            return
         stamp = self.frame_timestamp(arrival, frame_no, rate, epoch) if timestamp is None else timestamp
         if stamp - self._last_feed < self._interval - 0.0005:
             return
         try:
-            self._in_q.put_nowait((stamp, frame_bgr, native))
+            self._in_q.put_nowait((stamp, frame_bgr, native, reference))
         except queue.Full:
             self._queue_drops += 1
             if self._queue_drops == 1 or self._queue_drops % 100 == 0:
@@ -245,22 +657,20 @@ class _Recorder:
         self._last_feed = max(self._last_feed + self._interval, stamp - self._interval)
 
     def _encode_loop(self):
-        while True:
-            ts, frame, native = self._in_q.get()
+        packer = _ArchiveBuffer()
+        while not self._stop.is_set():
             try:
-                yuv = _archive_i420(frame, native)
-                ok, enc = cv2.imencode('.tiff', yuv, _PACKBITS)
+                ts, frame, native, reference = self._in_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                data = packer.pack(frame, native, reference)
             except Exception:
                 logger.exception('[报警视频] 帧压缩异常')
                 continue
-            if not ok:
-                continue
-            data = enc.tobytes()
             with self._buf_lock:
-                self._buf.append((ts, data))
-                cutoff = ts - _KEEP_SEC
-                while self._buf and self._buf[0][0] < cutoff:
-                    self._buf.popleft()
+                if not self._stop.is_set():
+                    self._buffer(ts, data)
 
     # ---- 触发（报警点调用，立即返回；返回视频 URL 供 warning_video 上报） ----
     def trigger(self, conf_name, alarm_ts=None, start_ts=None, analysis_type=None, images=()):
@@ -274,7 +684,7 @@ class _Recorder:
                 logger.info('[报警视频] 视频丢失期间没有可用画面: %s', conf_name)
                 return None
         with self._saving_lock:
-            if self._saving >= _MAX_CONCURRENT_SAVES:
+            if self._stop.is_set() or self._saving >= _MAX_CONCURRENT_SAVES:
                 logger.warning('[报警视频] %s 并发保存已达 %d 路，本次跳过',
                                conf_name, _MAX_CONCURRENT_SAVES)
                 return None
@@ -295,12 +705,23 @@ class _Recorder:
             logger.exception('[报警视频] %s 文件名占位失败，本次无视频', conf_name)
             return None
         count_clip = str(analysis_type) in ('01', '02', '0102')
-        threading.Thread(target=self._save_clip, args=(conf_name, alarm_ts, start_ts, path, count_clip, tuple(images)),
-                         name='alarm_video_save', daemon=True).start()
+        try:
+            threading.Thread(target=self._save_clip,
+                             args=(conf_name, alarm_ts, start_ts, path, count_clip, tuple(images)),
+                             name='alarm_video_save', daemon=True).start()
+        except Exception:
+            _discard(path)
+            with self._saving_lock:
+                self._saving -= 1
+            return None
         # URL 口径同报警图：主机 = 算力盒本机 IP（文件存在盒子上），端口 = upload_port
         return alarm_directory.media_url(path, cm.localhost_ip, cm.upload_port)
 
     def _encode_h264(self, conf_name, frames, fps, w, h, path):
+        with _spool_clip(frames, os.path.dirname(path) or '.'):
+            return self._encode_snapshot(conf_name, frames, w, h, path)
+
+    def _encode_snapshot(self, conf_name, frames, w, h, path):
         # Keep each actual frame once, on its own timestamp. The vendor encoder
         # writes fixed-rate DTS; Matroska carries the actual PTS and the final
         # stream copy derives matching MP4 sample durations without re-encoding.
@@ -322,11 +743,13 @@ class _Recorder:
                 # Stream each losslessly buffered YUV frame directly to the encoder.
                 # The MP4 remux below only copies packets.
                 rate_control = ['-b:v', _H264_BITRATE] if _H264_BITRATE else ['-qp', '20']
-                options = [(_FFMPEG, ['-c:v', 'h264_bm', '-gop_preset', '2',
-                                      '-is_dma_buffer', '0'] + rate_control)]
-                if os.path.isfile(_SOFT_FFMPEG):
-                    options.append((_SOFT_FFMPEG, ['-c:v', 'libx264', '-preset', 'veryfast',
-                                                   '-crf', '18', '-bf', '0', '-threads', '2']))
+                options = []
+                if _has_hardware_encoder(_FFMPEG):
+                    options.append((_FFMPEG, ['-c:v', 'h264_bm', '-gop_preset', '2',
+                                              '-is_dma_buffer', '0'] + rate_control))
+                soft_binary = _SOFT_FFMPEG if os.path.isfile(_SOFT_FFMPEG) else _FFMPEG
+                options.append((soft_binary, ['-c:v', 'libx264', '-preset', 'veryfast',
+                                              '-crf', '18', '-bf', '0', '-threads', '2']))
                 for binary, encoder in options:
                     if not binary:
                         continue
@@ -334,16 +757,20 @@ class _Recorder:
                            '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-video_size', '%dx%d' % (w, h),
                            '-framerate', str(_FPS), '-i', 'pipe:0', '-filter_threads', '1',
                            '-filter_script:v', graph] + encoder + [
-                           '-vsync', 'vfr', '-enc_time_base', '1:1000', '-r', str(_FPS), intermediate]
+                           '-vsync', 'vfr', '-enc_time_base', '1:1000']
+                    if encoder[1] == 'h264_bm':
+                        cmd.extend(['-r', str(_FPS)])
+                    cmd.append(intermediate)
                     try:
-                        with tempfile.TemporaryFile() as err, subprocess.Popen(
+                        with tempfile.TemporaryFile() as err, self._process(
                                 cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err) as proc:
                             timer = threading.Timer(180, proc.kill)
                             timer.start()
                             try:
                                 with proc.stdin as sink:
+                                    reader = _native_delta.Reader() if _native_delta is not None else None
                                     for _, data in frames:
-                                        plane = _unpack(data)
+                                        plane = _unpack(data, reader)
                                         if plane.shape != (h * 3 // 2, w):
                                             bgr = cv2.cvtColor(plane, cv2.COLOR_YUV2BGR_I420)
                                             plane = cv2.cvtColor(cv2.resize(bgr, (w, h)), cv2.COLOR_BGR2YUV_I420)
@@ -353,13 +780,15 @@ class _Recorder:
                             finally:
                                 timer.cancel()
                         break
-                    except (OSError, RuntimeError) as exc:
+                    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                         logger.warning("Alarm encoder %s failed: %s", encoder[1], type(exc).__name__)
                 else:
                     return False
-                subprocess.run([binary, '-nostdin', '-loglevel', 'error', '-i', intermediate,
-                                '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', output],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True, timeout=60)
+                remux = [binary, '-nostdin', '-loglevel', 'error', '-i', intermediate,
+                         '-map', '0:v:0', '-c', 'copy', '-movflags', '+faststart', output]
+                with self._process(remux, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as proc:
+                    if proc.wait(timeout=60):
+                        return False
                 os.replace(output, path)
             return True
         except (OSError, subprocess.SubprocessError) as exc:
@@ -372,40 +801,41 @@ class _Recorder:
             prune_dir(os.path.dirname(path), ('.mp4', '.avi', '.mp4.count-coverage.json'))
             # 等事件结束后 post 秒的帧全部进缓冲（多等 1.5s：采样间隔 + 压缩队列消化）
             wait = alarm_ts + _POST_SEC + 1.5 - time.time()
-            if wait > 0:
-                time.sleep(wait)
-            # 片段窗口 = [事件开始-pre, 事件结束+post]；瞬时报警始末同值即 pre+post 秒
-            lo, hi = start_ts - _PRE_SEC, alarm_ts + _POST_SEC
-            want = hi - lo
-            with self._buf_lock:
-                buf = list(self._buf)
-            frames = [item for item in buf if lo <= item[0] <= hi]
-            # 会话过长/收尾检测滞后过久时，事件窗口可能已部分/完全滚出环形缓冲——
-            # 完全滚出则退而保存缓冲里最近 want 秒（会话收尾场景），仍优于无视频/404；
-            # 部分滚出照存（视频短于应有时长），都打 warning 便于现场归因。
-            if frames and buf[0][0] > lo:
-                logger.warning('[报警视频] %s 时间窗头部已超出缓冲，保存可用时段', conf_name)
-            if len(frames) < 2:
-                logger.warning('[报警视频] %s 时间窗内缓冲帧不足(%d 帧)，放弃保存'
-                               '（进程刚启动或报警时刻距今超出缓冲窗口）；'
-                               '已上报的 warning_video 将无对应文件: %s', conf_name, len(frames), path)
+            if self._stop.wait(max(0.0, wait)):
                 _discard(path)
                 return
-            span = frames[-1][0] - frames[0][0]
-            fps = max(1.0, (len(frames) - 1) / span) if span > 0 else _FPS
-            plane = _unpack(frames[0][1])
-            h, w = plane.shape[0] * 2 // 3, plane.shape[1]
-            if self._encode_h264(conf_name, frames, fps, w, h, path):
-                if count_clip:
-                    try:
-                        _write_count_coverage(path, conf_name, start_ts, alarm_ts, frames, fps, images)
-                    except (OSError, ValueError):
-                        logger.warning('[报警视频] %s 保存统计录像时段信息失败', conf_name, exc_info=True)
-                logger.info('[报警视频] %s 已保存(H.264): %s（%d 帧 / %.1f 秒 / %.1ffps）',
-                            conf_name, path, len(frames), span, fps)
-                return
-            logger.error("No encoder could save the timestamped alarm clip: %s", path)
-            _discard(path)
+            with self._encode_slots:
+                # 片段窗口 = [事件开始-pre, 事件结束+post]；瞬时报警始末同值即 pre+post 秒
+                lo, hi = start_ts - _PRE_SEC, alarm_ts + _POST_SEC
+                want = hi - lo
+                with self._buf_lock:
+                    first_buffered = self._buf[0][0] if self._buf else None
+                    frames = [item for item in self._buf if lo <= item[0] <= hi]
+                # 会话过长/收尾检测滞后过久时，事件窗口可能已部分/完全滚出环形缓冲——
+                # 完全滚出则退而保存缓冲里最近 want 秒（会话收尾场景），仍优于无视频/404；
+                # 部分滚出照存（视频短于应有时长），都打 warning 便于现场归因。
+                if frames and first_buffered > lo:
+                    logger.warning('[报警视频] %s 时间窗头部已超出缓冲，保存可用时段', conf_name)
+                if len(frames) < 2:
+                    logger.warning('[报警视频] %s 时间窗内缓冲帧不足(%d 帧)，放弃保存'
+                                   '（进程刚启动或报警时刻距今超出缓冲窗口）；'
+                                   '已上报的 warning_video 将无对应文件: %s', conf_name, len(frames), path)
+                    _discard(path)
+                    return
+                span = frames[-1][0] - frames[0][0]
+                fps = max(1.0, (len(frames) - 1) / span) if span > 0 else _FPS
+                h, w = _frame_dimensions(frames[0][1])
+                if self._encode_h264(conf_name, frames, fps, w, h, path):
+                    if count_clip:
+                        try:
+                            _write_count_coverage(path, conf_name, start_ts, alarm_ts, frames, fps, images)
+                        except (OSError, ValueError):
+                            logger.warning('[报警视频] %s 保存统计录像时段信息失败', conf_name, exc_info=True)
+                    logger.info('[报警视频] %s 已保存(H.264): %s（%d 帧 / %.1f 秒 / %.1ffps）',
+                                conf_name, path, len(frames), span, fps)
+                    return
+                logger.error("No encoder could save the timestamped alarm clip: %s", path)
+                _discard(path)
         except Exception:
             _discard(path)
             logger.exception('[报警视频] %s 保存异常', conf_name)
@@ -440,30 +870,33 @@ def save_count_recording(session_id, conf_name, start_ts, end_ts, analysis_type,
     except (OSError, ValueError):
         pass
     wait = min(_POST_SEC + 1.5, end_ts + _POST_SEC + 1.5 - time.time())
-    if wait > 0:
-        time.sleep(wait)
-    lo, hi = start_ts - _PRE_SEC, end_ts + _POST_SEC
-    with recorder._buf_lock:
-        native = {ts:data for ts,data in recorder._buf if lo <= ts <= hi}
-    # Match exact native timestamps where possible. Keep real capture timestamps
-    # at millisecond resolution even when the sampling ring skipped that frame.
-    frames_by_ms = {round(ts*1000):(ts,data) for ts,data in backup.items() if lo <= ts <= hi}
-    frames_by_ms.update({round(ts*1000):(ts,data) for ts,data in native.items()})
-    for _, stamp, _ in images:
-        if stamp in backup:
-            frames_by_ms[round(stamp*1000)] = stamp, native.get(stamp, backup[stamp])
-    frames = sorted(frames_by_ms.values())
-    if len(frames) < 2 or not images:
-        raise ValueError('Insufficient real frames for count replay')
-    span = frames[-1][0] - frames[0][0]
-    fps = max(1.0, (len(frames)-1) / span)
-    plane = _unpack(next(iter(native.values())) if native else frames[0][1])
-    h, w = plane.shape[0]*2//3, plane.shape[1]
-    if not recorder._encode_h264(conf_name, frames, fps, w, h, path):
-        raise OSError('Count replay encoding failed')
-    _write_count_coverage(path, conf_name, start_ts, end_ts, frames, fps, images)
-    prune_dir(directory, ('.mp4', '.avi', '.mp4.count-coverage.json'))
-    return url
+    if recorder._stop.wait(max(0.0, wait)):
+        raise OSError('Alarm recorder is stopping')
+    with recorder._encode_slots:
+        lo, hi = start_ts - _PRE_SEC, end_ts + _POST_SEC
+        with recorder._buf_lock:
+            native = {ts:data for ts,data in recorder._buf if lo <= ts <= hi}
+        # Match exact native timestamps where possible. Keep real capture timestamps
+        # at millisecond resolution even when the sampling ring skipped that frame.
+        frames_by_ms = {round(ts*1000):(ts,data) for ts,data in backup.items() if lo <= ts <= hi}
+        frames_by_ms.update({round(ts*1000):(ts,data) for ts,data in native.items()})
+        for _, stamp, _ in images:
+            if stamp in backup:
+                frames_by_ms[round(stamp*1000)] = stamp, native.get(stamp, backup[stamp])
+        frames = sorted(frames_by_ms.values())
+        if len(frames) < 2 or not images:
+            raise ValueError('Insufficient real frames for count replay')
+        span = frames[-1][0] - frames[0][0]
+        fps = max(1.0, (len(frames)-1) / span)
+        h, w = _frame_dimensions(next(iter(native.values())) if native else frames[0][1])
+        # The clip list now owns these references. Allow spooling to release them.
+        native.clear()
+        frames_by_ms.clear()
+        if not recorder._encode_h264(conf_name, frames, fps, w, h, path):
+            raise OSError('Count replay encoding failed')
+        _write_count_coverage(path, conf_name, start_ts, end_ts, frames, fps, images)
+        prune_dir(directory, ('.mp4', '.avi', '.mp4.count-coverage.json'))
+        return url
 
 
 def _get():
@@ -478,6 +911,13 @@ def _get():
     return rec
 
 
+def close():
+    with _recorder_lock:
+        recorder = _recorder
+        if recorder is not None and recorder.pid == os.getpid():
+            recorder.close()
+
+
 def frame_timestamp(arrival=None, frame_no=None, rate=0, epoch=None):
     """Clock shared by opt-in inference callbacks and their recorded frames."""
     try:
@@ -487,10 +927,10 @@ def frame_timestamp(arrival=None, frame_no=None, rate=0, epoch=None):
         return time.time() if arrival is None else arrival
 
 
-def feed(frame_bgr, arrival=None, frame_no=None, rate=0, epoch=None, native=None, timestamp=None):
+def feed(frame_bgr, arrival=None, frame_no=None, rate=0, epoch=None, native=None, timestamp=None, reference=None):
     '''每帧喂入显示帧（引擎聚合线程 / s2m 解码回调调用）。内部时间采样 + 异步压缩，热路径安全。'''
     try:
-        _get().feed(frame_bgr, arrival, frame_no, rate, epoch, native, timestamp)
+        _get().feed(frame_bgr, arrival, frame_no, rate, epoch, native, timestamp, reference)
     except Exception:
         pass          # 缓冲失败绝不影响推理/推流主链路
 

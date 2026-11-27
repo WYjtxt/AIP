@@ -1768,6 +1768,22 @@ def assemble_stream_cfg(entries, **overrides) -> Dict[str, Any]:
     return cfg
 
 
+def _opencv_worker_threads(environment):
+    # Preserve the explicit per-worker override; container_runtime sets CV2_NUM_THREADS.
+    configured = environment.get('OPENCV_FOR_THREADS_NUM') or environment.get('CV2_NUM_THREADS')
+    try:
+        return max(1, int(configured or '1'))
+    except (ValueError, TypeError):
+        return 1
+
+
+def _decoder_idle_delay(empty_for):
+    # Keep the 5 ms polling interval until the FIFO has stayed empty for 250 ms.
+    if empty_for < 0.25:
+        return 0.005
+    return min(0.020, 0.004 + empty_for * 0.004)
+
+
 def run(cfg):
     '''主流程：加载多模型 → SAIL Decoder 硬解拉流 → 推理/绘制 → SAIL Encoder 硬编推流。
 
@@ -1779,8 +1795,7 @@ def run(cfg):
 
     _setup_logging(cfg)
     # Each camera worker owns an OpenCV pool. Keep CPU headroom for sibling cameras.
-    threads = int(os.environ.get('OPENCV_FOR_THREADS_NUM') or '4')
-    cv2.setNumThreads(max(1, threads))
+    cv2.setNumThreads(_opencv_worker_threads(os.environ))
     logger.info("OpenCV worker threads=%d", cv2.getNumThreads())
     # native_hik_stream integration
     from comm.algorithm_platform_source import HikCaptureSource
@@ -1986,11 +2001,12 @@ def run(cfg):
                             break
                         ret = decoder.read(md_channel, frame, 0)
                         if ret != 0 or frame.width() <= 0:
-                            if time.monotonic() - last_frame_ok > stall_timeout:
+                            empty_for = time.monotonic() - last_frame_ok
+                            if empty_for > stall_timeout:
                                 reconnect_reason = ('SAIL MultiDecoder %.0fs 未收到帧，判定断流'
                                                     % stall_timeout)
                                 break
-                            time.sleep(0.005)    # 空队列小睡（释放 GIL），等内部线程来帧
+                            state.stop_event.wait(_decoder_idle_delay(empty_for))
                             continue
                         if state.archive_source_fps and hasattr(decoder, 'get_drop_num'):
                             try:

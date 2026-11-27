@@ -141,17 +141,25 @@ def _proxy_entries(data):
     return data
 
 
-def _proxy_detail(data, media, app, live):
-    """Private evidence only; no raw source is returned by the public APIs."""
-    matches = []
+def _proxy_identity(item):
+    source = item.get('src') if isinstance(item.get('src'), dict) else {}
+    key = item.get('key')
+    parts = key.rsplit('/', 2) if isinstance(key, str) else []
+    app = source.get('app') or item.get('app') or (parts[-2] if len(parts) == 3 else None)
+    live = source.get('stream') or item.get('stream') or (parts[-1] if len(parts) == 3 else None)
+    return app, live
+
+
+def _index_proxies(data):
+    grouped = {}
     for item in _proxy_entries(data):
-        source = item.get('src') if isinstance(item.get('src'), dict) else {}
-        key = item.get('key')
-        parts = key.rsplit('/', 2) if isinstance(key, str) else []
-        item_app = source.get('app') or item.get('app') or (parts[-2] if len(parts) == 3 else None)
-        item_live = source.get('stream') or item.get('stream') or (parts[-1] if len(parts) == 3 else None)
-        if (item_app, item_live) == (app, live):
-            matches.append(item)
+        app, live = _proxy_identity(item)
+        if isinstance(app, str) and isinstance(live, str):
+            grouped.setdefault((app, live), []).append(item)
+    return grouped
+
+
+def _detail_for_proxy_matches(matches, relevant):
     if not matches:
         return None
     if len(matches) != 1:
@@ -159,8 +167,6 @@ def _proxy_detail(data, media, app, live):
     item = matches[0]
     source = item.get('src') if isinstance(item.get('src'), dict) else {}
     detail = {'key': item.get('key'), 'source': source.get('url') or item.get('url')}
-    relevant = [row for row in media if isinstance(row, dict)
-                and (row.get('app'), row.get('stream')) == (app, live)]
     counts = []
     incomplete = False
     # A proxy's aggregate count is preferred. If absent, every actual media
@@ -177,6 +183,16 @@ def _proxy_detail(data, media, app, live):
             counts.extend(values)
     detail['readers'] = max(counts) if counts and not incomplete else None
     return detail
+
+
+def _proxy_detail(data, media, app, live):
+    """Private evidence only; no raw source is returned by the public APIs."""
+    matches = [item for item in _proxy_entries(data) if _proxy_identity(item) == (app, live)]
+    if len(matches) != 1:
+        return _detail_for_proxy_matches(matches, ())
+    relevant = [row for row in media if isinstance(row, dict)
+                and (row.get('app'), row.get('stream')) == (app, live)]
+    return _detail_for_proxy_matches(matches, relevant)
 
 
 def _proxy_token(detail):

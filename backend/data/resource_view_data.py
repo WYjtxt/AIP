@@ -5,7 +5,8 @@ from model.algorithm import *
 from model.equipment import *
 from model.extra import *
 from model.log import *
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.exc import DBAPIError
 
 
 class ResourceViewData:
@@ -81,10 +82,28 @@ class ResourceViewData:
     # 资源使用情况相关数据操作
     @staticmethod
     def get_resource_usage_by_computing_id(computing_id):
-        """
-        根据算力设备ID获取资源使用情况
-        """
-        return db.session.query(Resource_usage).filter(Resource_usage.computing_id == computing_id).all()
+        """Read card measurements against the database clock, including legacy rows."""
+        from common.platform_host_identity import RESOURCE_SAMPLE_TABLE, TABLE, _missing_table
+
+        fields = ('SELECT r.id,r.dev_ip,r.dev_id,r.board_temp,r.chip_temp,r.dev_get_sn,r.dev_get_target,'
+                  'r.mem_used_mem_total,r.memory_usage_rate,r.tpu_util,')
+        filters = ' WHERE r.computing_id=:computing_id ORDER BY r.id'
+        params = {'computing_id': computing_id}
+        try:
+            query = fields + ('s.resource_id IS NOT NULL AS identity_sample, '
+                'COALESCE(s.sampled_at,r.updated_at) AS sample_token, '
+                'TIMESTAMPDIFF(MICROSECOND,COALESCE(s.sampled_at,r.updated_at),CURRENT_TIMESTAMP(6))/1000000.0 AS sample_age '
+                'FROM t_resource_usage AS r LEFT JOIN ' + TABLE + ' AS i ON i.computing_id=r.computing_id '
+                'LEFT JOIN ' + RESOURCE_SAMPLE_TABLE + ' AS s ON s.host_uid=i.host_uid AND s.resource_id=r.id')
+            return [dict(row) for row in db.session.execute(text(query + filters), params).mappings()]
+        except DBAPIError as error:
+            if not _missing_table(error.orig):
+                raise
+            db.session.rollback()
+        query = fields + ('0 AS identity_sample, r.updated_at AS sample_token, '
+            'TIMESTAMPDIFF(MICROSECOND,r.updated_at,CURRENT_TIMESTAMP(6))/1000000.0 AS sample_age '
+            'FROM t_resource_usage AS r')
+        return [dict(row) for row in db.session.execute(text(query + filters), params).mappings()]
 
     # 算法配置相关数据操作
     @staticmethod

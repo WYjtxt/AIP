@@ -30,6 +30,7 @@ def run(arguments, source=None, timeout=60):
 DATABASE = r'''
 import configparser,hashlib,json,pymysql,sys
 sys.path.insert(0,'/data/AIGO/platform_start/Config_files')
+sys.path.insert(1,'/data/AIGO/platform_start/backend/common')
 from platform_host_identity import (TABLE, _missing_table, bind_identity, ensure_schema,
                                     identity_rows, read_host_identity, resolve_device, update_address)
 c=configparser.ConfigParser(interpolation=None);c.read('/data/AIGO/platform_start/Config_files/config.ini',encoding='utf-8');d=c['database']

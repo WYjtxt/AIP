@@ -11,6 +11,8 @@ import logging
 import time
 import uuid
 
+from service.media_stream_index import index_media_streams, media_stream_rows
+
 PREFIX = 'bound_recovery:v1:'
 STATE_KEY = PREFIX + 'states'
 SUMMARY_KEY = PREFIX + 'summary'
@@ -84,11 +86,9 @@ def _set_state(record, state, reason, now, **values):
         logger.info('bound_stream_recovery %s', json.dumps(_public(record), sort_keys=True, ensure_ascii=False))
 
 
-def _media_evidence(rows, app, live):
+def _media_evidence(rows):
     candidates = []
     for row in rows:
-        if not isinstance(row, dict) or (row.get('app'), row.get('stream')) != (app, live):
-            continue
         counters, video = [], False
         for track in row.get('tracks') or []:
             if not isinstance(track, dict) or str(track.get('codec_type')) != '0':
@@ -112,7 +112,7 @@ def _media_evidence(rows, app, live):
         return {'video': False, 'frames': None, 'generation': None}
     # Compare one stable protocol/session; replicated protocol counters are not
     # interchangeable proof of frame progress.
-    chosen = sorted(candidates, key=lambda value: (value[0], value[1], value[2] or ''))[0]
+    chosen = min(candidates, key=lambda value: (value[0], value[1], value[2] or ''))
     return {'video': True, 'frames': chosen[3], 'generation': chosen[2]}
 
 
@@ -194,7 +194,8 @@ def run_bound_stream_recovery(enabled=True, pause_reason=None, _services=None):
                 services.save_summary(dict(checked_at=now, paused=True, reason=pause_reason or 'activation_unavailable'))
                 return False, '流媒体自动恢复已暂停，请检查平台激活状态'
             snapshots = services.candidates()
-            media, proxies = services.observe()
+            observed_media, proxies = services.observe()
+            media = index_media_streams(observed_media)
             records = services.load_states()
             if not isinstance(records, dict):
                 raise ValueError('invalid state')
@@ -212,8 +213,9 @@ def run_bound_stream_recovery(enabled=True, pause_reason=None, _services=None):
                     record = _new_record(snapshot, now)
                 record['last_observed_at'] = now
                 binding = snapshot['binding']
+                matching_media = media_stream_rows(media, binding['app'], binding['live']) or []
                 if record.get('reconciliation_required'):
-                    detail = services.proxy_detail(proxies, media, binding['app'], binding['live'])
+                    detail = services.proxy_detail(proxies, matching_media, binding['app'], binding['live'])
                     expected = services.proxy_token(dict(key=binding['key'], source=binding['source']))
                     if detail is not None and (not expected or services.proxy_token(detail) != expected):
                         _set_state(record, 'needs_attention', 'reconciliation_required', now)
@@ -222,7 +224,7 @@ def run_bound_stream_recovery(enabled=True, pause_reason=None, _services=None):
                         continue
                     if detail is not None:
                         record.pop('reconciliation_required', None)
-                evidence = _media_evidence(media, binding['app'], binding['live'])
+                evidence = _media_evidence(matching_media)
                 if _observe_video(record, evidence, now):
                     record.pop('proxy_token', None)
                     record.pop('proxy_first_seen_at', None)
@@ -231,7 +233,7 @@ def run_bound_stream_recovery(enabled=True, pause_reason=None, _services=None):
                     # Observe published media, but do not retry rejected accounts.
                     _set_state(record, 'source_auth_paused', record.get('auth_reason', 'source_auth_failed'), now, next_retry_at=0)
                 else:
-                    detail = services.proxy_detail(proxies, media, binding['app'], binding['live'])
+                    detail = services.proxy_detail(proxies, matching_media, binding['app'], binding['live'])
                     stalled = _observe_proxy(record, detail, services.proxy_token(detail), now)
                     ready = detail is None or isinstance(stalled, dict)
                     due = now >= record.get('next_retry_at', 0)
@@ -369,9 +371,12 @@ def seed_auth_pause(equipment_id, reason='account_maintenance', expected_auth_to
 
 class _MonitorRuntime:
     def __init__(self):
-        from service.bound_preview_recovery import _Runtime, _validate, _proxy_detail, _proxy_token, recover_bound_preview
+        from service.bound_preview_recovery import (
+            _Runtime, _validate, _detail_for_proxy_matches, _index_proxies, _proxy_token, recover_bound_preview,
+        )
         self.runtime, self.validate = _Runtime(), _validate
-        self.proxy_detail, self.proxy_token = _proxy_detail, _proxy_token
+        self._index_proxies, self._detail_for_proxy_matches = _index_proxies, _detail_for_proxy_matches
+        self.proxy_token = _proxy_token
         self.recover_function = recover_bound_preview
         self.client = self.runtime.source._redis()
 
@@ -445,7 +450,10 @@ class _MonitorRuntime:
             raise ValueError('media unavailable')
         # Validate identity structure before any mutation, including empty lists.
         self.runtime.identities(proxies.get('data'))
-        return media.get('data') or [], proxies.get('data')
+        return media.get('data') or [], self._index_proxies(proxies.get('data'))
+
+    def proxy_detail(self, proxies, media, app, live):
+        return self._detail_for_proxy_matches(proxies.get((app, live), []), media)
 
     def recover(self, equipment_id, stalled):
         return self.recover_function(equipment_id, _services=self.runtime, _stalled=stalled)
